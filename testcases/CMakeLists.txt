@@ -1,0 +1,12 @@
+# testcases/CMakeLists.txt
+cmake_minimum_required(VERSION 3.10)
+
+set(PATH_TESTCASES ${CMAKE_CURRENT_SOURCE_DIR})
+
+# ============================================================
+# 测试程序
+# ============================================================
+add_executable(test_log ${PATH_TESTCASES}/test_log.cc)
+
+# 自动继承 lrpc 的 include 路径（因为是 PUBLIC）
+target_link_libraries(test_log lrpc pthread dl)
