@@ -1,13 +1,35 @@
+#include "config.h"
 #include "log.h"
+#include <cstddef>
+#include <pthread.h>
+#include <string>
+
+void *func(void*){
+    int i = 100;
+    while (i --){
+        DEBUGLOG("this is thread in %s", "func");
+        INFOLOG("this is thread in %s", "func");
+        ERRORLOG("this is thread in %s", "func");
+    }
+
+    return NULL;
+}
 
 int main(){
 
-    // DEBUGLOG("test log %s", 11);
-    std ::string msg = (new lrpc ::LogEvent(lrpc ::LogLevel ::Debug))->toString() +
-                   lrpc ::formatString("test log %s", "11");
-    msg += "\n";
-    lrpc ::Logger ::GetGlobalLogger()->pushLog(msg);
-    lrpc ::Logger ::GetGlobalLogger()->log();
+    lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
+    lrpc::Logger::SetGlobalLogger();
+
+    pthread_t thread;
+    pthread_create(&thread, NULL, func, NULL);
+
+    int i = 100;
+    while (i --){ 
+        DEBUGLOG("test debug log %s", std::to_string(i).c_str());
+        INFOLOG("test info log %s", std::to_string(i).c_str());
+        ERRORLOG("test error log %s", std::to_string(i).c_str());
+    }
+    pthread_join(thread, NULL);
 
     return 0;
 }

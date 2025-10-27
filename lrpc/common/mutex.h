@@ -4,6 +4,11 @@
 #include <pthread.h>
 namespace lrpc {
 
+/**
+ * @brief 
+ * RAII锁
+ * @tparam T 
+ */
 template<class T>
 class ScopeMutex{
 public:
@@ -33,6 +38,10 @@ private:
     bool is_lock_ {false};
 };
 
+/**
+ * @brief 封装pthread锁，类似std::mutex
+ * 
+ */
 class Mutex{
 public: 
     Mutex() {
@@ -43,11 +52,11 @@ public:
         pthread_mutex_destroy(&mutex_);
     }
 
-    void Lock(){
+    void lock(){
         pthread_mutex_lock(&mutex_);
     }
 
-    void Unlock(){
+    void unlock(){
         pthread_mutex_unlock(&mutex_);
     }
 

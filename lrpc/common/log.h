@@ -19,10 +19,25 @@ std::string formatString(const char* str, Args&& ...args){
 }
 
 #define DEBUGLOG(str, ...)\
-    std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Debug))->toString() + lrpc::formatString(str, ##__VA_ARGS__); \
-    msg += "\n";\
-    lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
-    lrpc::Logger::  GetGlobalLogger()->log();\
+    if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Debug) {\
+        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Debug))->toString() + "[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]\t" + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
+        lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
+        lrpc::Logger::  GetGlobalLogger()->log();\
+    }\
+
+#define INFOLOG(str, ...)\
+    if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Info) {\
+        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Info))->toString() + "[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]\t" + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
+        lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
+        lrpc::Logger::  GetGlobalLogger()->log();\
+    }\
+
+#define ERRORLOG(str, ...)\
+    if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Error) {\
+        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Error))->toString() + "[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]\t" + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
+        lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
+        lrpc::Logger::  GetGlobalLogger()->log();\
+    }\
 
 enum class LogLevel{
     Unknown = 0,
@@ -32,18 +47,21 @@ enum class LogLevel{
 };
 
 std::string LogLevelToString(LogLevel level);
-
+LogLevel StringToLogLevel(const std::string& log_level);
 
 class Logger{
 public:
     // typedef std::shared_ptr<Logger> s_ptr;
+    Logger(LogLevel level): log_level_(level){}
 
+    static Logger* GetGlobalLogger();
+    static void SetGlobalLogger();
+public:
     void pushLog(const std::string &msg);
     void log();
-public:
-    static Logger* GetGlobalLogger();
+    LogLevel getLogLevel() { return log_level_; }
 private:
-    LogLevel level_;
+    LogLevel log_level_;
     std::queue<std::string> buffer_;
     Mutex mutex_;
 
