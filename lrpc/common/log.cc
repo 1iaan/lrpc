@@ -1,7 +1,7 @@
-#include "log.h"
-#include "config.h"
-#include "mutex.h"
-#include "util.h"
+#include "lrpc/common/log.h"
+#include "lrpc/common/config.h"
+#include "lrpc/common/mutex.h"
+#include "lrpc/common/util.h"
 #include <cstdio>
 #include <sstream>
 #include <string>
@@ -72,7 +72,7 @@ std::string LogEvent::toString(){
     tid_ = get_thread_id();
 
     std::stringstream ss;
-    ss  << "["  << LogLevelToString(level_) << "]\t"
+    ss  << "["  << LogLevelToString(log_level_) << "]\t"
         << "["  << ctime_ <<"]\t"   
         << "["  << pid_ << ":" << tid_ << "]\t";
 

@@ -11,6 +11,7 @@ public:
 
 public:
     static void SetGlobalConfig(const char* xmlfile);
+    
     static Config* GetGlobalConfig();
 
 public:

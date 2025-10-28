@@ -1,4 +1,4 @@
-#include "config.h"
+#include "lrpc/common/config.h"
 #include <cstddef>
 #include <tinyxml/tinyxml.h>
 

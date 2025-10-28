@@ -1,5 +1,5 @@
 #pragma once
-#include "mutex.h"
+#include "lrpc/common/mutex.h"
 #include <cstdio>
 #include <queue>
 #include <string>
@@ -10,11 +10,11 @@ namespace lrpc {
 template<typename... Args>
 std::string formatString(const char* str, Args&& ...args){
     int size = snprintf(nullptr, 0, str, args...); // 获取格式化长度
+    if(size <= 0) return {};
+    
     std::string result;
-    if(size > 0){
-        result.resize(size);
-        snprintf(&result[0], size + 1, str, args...);
-    }
+    result.resize(size);
+    snprintf(&result[0], size + 1, str, args...);
     return result;
 }
 
@@ -52,14 +52,21 @@ LogLevel StringToLogLevel(const std::string& log_level);
 class Logger{
 public:
     // typedef std::shared_ptr<Logger> s_ptr;
+    
     Logger(LogLevel level): log_level_(level){}
 
+public: 
     static Logger* GetGlobalLogger();
+
     static void SetGlobalLogger();
+
 public:
     void pushLog(const std::string &msg);
+
     void log();
+
     LogLevel getLogLevel() { return log_level_; }
+
 private:
     LogLevel log_level_;
     std::queue<std::string> buffer_;
@@ -72,20 +79,22 @@ private:
 
 class LogEvent {
 public:
-    LogEvent(LogLevel level): level_(level){}
+    LogEvent(LogLevel level): log_level_(level){}
 
+public:
     std::string getFileName() const { return filename_; }
 
-    LogLevel getLogLevel() const { return level_; }
+    LogLevel getLogLevel() const { return log_level_; }
 
     std::string toString();
+    
 private:
     std::string filename_;  // 文件名
     std::string fileline_;  // 行号
     int pid_;               // 进程号
     int tid_;               // 线程号
     std::string ctime_;     // 时间
-    LogLevel level_;        // 日志级别
+    LogLevel log_level_;        // 日志级别
 
 };
 

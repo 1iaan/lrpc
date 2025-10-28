@@ -1,0 +1,56 @@
+#pragma once
+#include <functional>
+#include <string>
+#include <sys/epoll.h>
+
+namespace lrpc{
+
+enum TriggerEvent {
+    IN_EVENT = EPOLLIN,
+    OUT_EVENT = EPOLLOUT,
+};
+
+class FdEvent{
+public:
+
+    FdEvent(int fd);
+    FdEvent(int fd, std::string fd_name);
+    
+    ~FdEvent();
+
+    std::function<void()> handler(TriggerEvent ev_t);
+
+    void listen(TriggerEvent ev_t, std::function<void()> callback);
+
+    int getFd() const { return fd_; }
+    std::string getFdName() { return fd_name_; }
+
+    epoll_event getEpollEvent() { return listen_events_; }
+
+private:
+    int fd_{-1};
+    std::string fd_name_;
+    epoll_event listen_events_;
+    std::function<void()> read_callback_;
+    std::function<void()> write_callback_;
+
+public:
+
+};
+
+
+class WakeUpFdEvent : public FdEvent{
+public:
+    WakeUpFdEvent(int fd);
+
+    ~WakeUpFdEvent();
+
+public:
+    void wakeup();
+
+private:
+
+};
+
+
+} // namespace lrpc

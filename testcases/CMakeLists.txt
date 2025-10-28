@@ -7,6 +7,8 @@ set(PATH_TESTCASES ${CMAKE_CURRENT_SOURCE_DIR})
 # 测试程序
 # ============================================================
 add_executable(test_log ${PATH_TESTCASES}/test_log.cc)
+add_executable(test_eventloop ${PATH_TESTCASES}/test_eventloop.cc)
 
 # 自动继承 lrpc 的 include 路径（因为是 PUBLIC）
-target_link_libraries(test_log lrpc pthread dl)
+target_link_libraries(test_log          lrpc pthread dl)
+target_link_libraries(test_eventloop    lrpc pthread dl)
