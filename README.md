@@ -23,12 +23,21 @@
   - [WakeUpFdEvent](#wakeupfdevent)
   - [EventLoop](#eventloop)
     - [eventloop.h](#eventlooph)
+    - [添加EPOLL事件宏](#添加epoll事件宏)
+    - [删除EPOLL事件宏](#删除epoll事件宏)
     - [eventloop.cc](#eventloopcc)
+      - [初始化与析构](#初始化与析构)
+      - [主循环](#主循环)
+      - [辅助函数](#辅助函数)
+      - [添加/删除EPOLL操作](#添加删除epoll操作)
 - [TCP](#tcp)
 - [RPC](#rpc)
   - [协议封装](#协议封装)
   - [模块封装](#模块封装)
 - [项目完善](#项目完善)
+- [测试](#测试)
+  - [log](#log)
+  - [eventloop](#eventloop-1)
 - [结语](#结语)
 
 
@@ -96,26 +105,6 @@ std ::string log_level = std ::string(log_level_node->GetText());
 ```
 ## config.cc
 ```c++
-#include "config.h"
-#include <cstddef>
-#include <tinyxml/tinyxml.h>
-
-namespace lrpc{
-#define READ_XML_NODE(name, parent)                                             \
-    TiXmlElement* name#_node = parent->FirstChildElement(#name);               \
-    if(!name#_node){                                                           \
-        printf("Start lrpc server error, failed to read node [%s]\n", #name);   \
-        exit(0);                                                                \
-    }                                                                           \
-
-#define READ_STR_FROM_XML_NODE(name, parent)                                    \
-    TiXmlElement* name#_node = parent->FirstChildElement(#name);               \
-    if(!name#_node || !name#_node->GetText()) {                               \
-        printf("Start lrpc server error, failed to read node [%s]\n", #name);   \
-    }                                                                           \
-    std::string name = std::string(name#_node->GetText());                     \
-
-
 static Config* g_config = NULL;
 void Config::SetGlobalConfig(const char* xmlfile){
     if(g_config == NULL){
@@ -146,8 +135,6 @@ Config::Config(const char* xmlfile){
     printf("Config: \n");
     printf("\tlog_level:\t[%s]\n", log_level_.c_str());
 }
-
-} // namespace lrpc
 ```
 
 # Mutex
@@ -155,12 +142,6 @@ Config::Config(const char* xmlfile){
 这里直接用C++ mutex 也可以，内部实现是差不多的  
 ## mutex.h
 ```c++
-#pragma once
-
-#include <cstddef>
-#include <pthread.h>
-namespace lrpc {
-
 /**
  * @brief 
  * RAII锁
@@ -287,11 +268,11 @@ public:
     std::string toString();
 
 private:
-    std::string filename_;  // 文件名
-    std::string fileline_;  // 行号
-    int pid_;               // 进程号
-    int tid_;               // 线程号
-    std::string ctime_;     // 时间
+    std::string filename_;      // 文件名
+    std::string fileline_;      // 行号
+    int pid_;                   // 进程号
+    int tid_;                   // 线程号
+    std::string ctime_;         // 时间
     LogLevel log_level_;        // 日志级别
 
 };
@@ -382,20 +363,6 @@ if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Debug) {
 ```
 ## log.cc
 ```c++
-#include "log.h"
-#include "config.h"
-#include "mutex.h"
-#include "util.h"
-#include <cstdio>
-#include <sstream>
-#include <string>
-#include <sys/time.h>
-#include <time.h>
-
-
-
-namespace lrpc {
-
 static Logger* g_logger = nullptr;
 
 void Logger::SetGlobalLogger(){
@@ -477,9 +444,6 @@ void Logger::log(){
         printf("%s", msg.c_str());
     }
 }
-
-
-} // namespace lrpc
 ```
 
 # Reactor(EventLoop)
@@ -499,17 +463,17 @@ Reactor 模式是一种事件驱动的设计模式，
 目前的实现是负责Reactor的线程也负责执行，也就是单个线程同时负责等待、分发、执行。
 
 ## FdEvent
-作用：把回调和fd上的IO事件绑定起来。
+作用：把callback、fd与epoll事件绑定起来。
+
+1. listen: 给fd绑定回调。
+2. handler： 返回fd对应的回调。
+3. getEpollEvent: 返回fd上绑定的事件。
+
+
 
 ### fd_event.h
 ```c++
-#pragma once
-#include <functional>
-#include <sys/epoll.h>
-
-namespace lrpc{
-
-enum class TriggerEvent {
+enum TriggerEvent {
     IN_EVENT = EPOLLIN,
     OUT_EVENT = EPOLLOUT,
 };
@@ -518,6 +482,7 @@ class FdEvent{
 public:
 
     FdEvent(int fd);
+    FdEvent(int fd, std::string fd_name);
     
     ~FdEvent();
 
@@ -526,26 +491,32 @@ public:
     void listen(TriggerEvent ev_t, std::function<void()> callback);
 
     int getFd() const { return fd_; }
+    std::string getFdName() { return fd_name_; }
 
     epoll_event getEpollEvent() { return listen_events_; }
 
 private:
-    epoll_event listen_events_;
-
-public:
     int fd_{-1};
+    std::string fd_name_;
+    epoll_event listen_events_;
     std::function<void()> read_callback_;
     std::function<void()> write_callback_;
-
 };
 
-} // namespace lrpc
 ```
 
 ### fd_event.cc
 ```c++
 FdEvent::FdEvent(int fd): fd_(fd){
+    fd_name_ = "fd_" + std::to_string(fd);
+    memset(&listen_events_, 0, sizeof(listen_events_));
+    listen_events_.data.ptr = this;
+}
 
+
+FdEvent::FdEvent(int fd, std::string fd_name): fd_(fd), fd_name_(fd_name){
+    memset(&listen_events_, 0, sizeof(listen_events_));
+    listen_events_.data.ptr = this;
 }
 
 FdEvent::~FdEvent(){
@@ -570,32 +541,33 @@ void FdEvent::listen(TriggerEvent ev_t, std::function<void()> callback){
         case TriggerEvent::IN_EVENT:{
             listen_events_.events |= EPOLLIN;
             read_callback_ = callback;
+            break;
         }
         case TriggerEvent::OUT_EVENT:{
             listen_events_.events |= EPOLLOUT;
-            write_callback_ = callback;        
+            write_callback_ = callback;       
+            break; 
         }
         default:
         break;
     }
-    listen_events_.data.ptr = this;
 }
+
 
 ```
 
 ## WakeUpFdEvent
-作用：其他线程通过这个线程唤醒主Reactor线程。
+作用：将主线程从EPOLL_WAIT中唤醒。
+1. 其他线程添加EpollEvent。
+2. 定时器到时间。
 
 EventLoop初始化的时候定义了该对象, 并且监听EPOLLIN, 定义回调函数为消费这些数据。
 
-其wakeup方法会向wakeup_fd_event_写入数据, 从而唤醒epoll_wait。
+其wakeup方法会向wakeup_fd_event_写入数据, 从而唤醒epoll_wait。  
+可以是其他线程AddTask调用，也可以是定时器调用。
 
 感觉没有必要抽象出一个类呢。但为了单独说明其重要性还是抽象出来。
 ```c++
-#pragma once
-
-#include "lrpc/net/fd_event.h"
-namespace lrpc{
 class WakeUpFdEvent : public FdEvent{
 public:
     WakeUpFdEvent(int fd);
@@ -606,6 +578,11 @@ public:
     void wakeup();
 };
 
+WakeUpFdEvent::WakeUpFdEvent(int fd) : FdEvent(fd, "WAKEUP"){
+
+}
+
+// 作用：在其他线程添加EpollEvent的时候，将主线程从EPOLL_WAIT中唤醒。
 void WakeUpFdEvent::wakeup(){
     uint64_t one = 1;
     int rt = write(fd_, &one, sizeof(one));
@@ -613,8 +590,6 @@ void WakeUpFdEvent::wakeup(){
         ERRORLOG("write to wakeup fd less than 8 bytes, fd[%d]", fd_);
     }
 }
-
-} // namespace lrpc
 ```
 
 ## EventLoop
@@ -623,7 +598,7 @@ eventloop
 while (!stop_) {
     执行 tasks_ 里的任务（来自其他线程）
     epoll_wait() 等待事件
-    调用 addTask 把 fd_event 对应任务的回调加入到 tasks_ 中 
+    针对对应的事件，调用 addTask 把其对应的回调加入到 tasks_ 中 
 }
 ```
 addEpollEvent 注册事件
@@ -645,17 +620,6 @@ if(是本线程){
 
 ### eventloop.h
 ```c++
-#pragma once
-
-#include "lrpc/net/fd_event.h"
-#include "lrpc/common/mutex.h"
-#include "wakeup_fd_event.h"
-#include <queue>
-#include <sched.h>
-#include <set>
-#include <functional>
-namespace lrpc{
-
 class EventLoop{
 public:
     EventLoop();
@@ -663,27 +627,20 @@ public:
     ~EventLoop();
 
 public:
-    // 主循环
     void loop();
     
-    // 唤醒
     void wakeup();
 
-    // 中断
     void stop();
 
-    // 添加监听事件
     // 如果是主线程执行就直接执行，不是主线程就丢进tasks_里等待主线程执行。
     void addEpollEvent(FdEvent* event);
 
-    // 删除监听事件
     // 如果是主线程执行就直接执行，不是主线程就丢进tasks_里等待主线程执行。
     void delEpollEvent(FdEvent* event);
 
-    // 是主循环的线程
     bool isInLoopThread();
 
-    // 添加任务
     void addTask(std::function<void()> callback, bool is_wake_up = false);
 
 private:
@@ -709,12 +666,221 @@ private:
 
     void initWakeUpFdEvent();
 };
+```
 
-} // namespace lrpc
+### 添加EPOLL事件宏
+如果存在于正在监听的fd中，op为MOD，否则为ADD  
+添加的是封装的FdEvent的fd与event, 尽管event中有fd和ptr但这里还是不省那点内存  
+将event.fd添加到正在监听的fd中
+```c++                                                      
+    auto it = listen_fds_.find(event->getFd());
+    int op = EPOLL_CTL_ADD;
+    if (it != listen_fds_.end()) {
+    op = EPOLL_CTL_MOD;
+    }
+    epoll_event tmp = event->getEpollEvent();
+    int rt = epoll_ctl(epoll_fd_, op, event->getFd(), &tmp); 
+    if (rt == -1) {
+    ERRORLOG("faild epoll_ctl when add fd [%d:%s], errno=%d, errno=%s",
+                event->getFd(), event->getFdName().c_str(), errno,
+                strerror(errno));
+    } else {
+    listen_fds_.insert(event->getFd()); 
+    }
+    DEBUGLOG("add event success, fd [%d:%s], event [%d]", event->getFd(),
+            event->getFdName().c_str(), tmp);
+```
+```c++
+#define ADD_TO_EPOLL()  \
+    auto it = listen_fds_.find(event->getFd()); \
+    int op = EPOLL_CTL_ADD; \
+    if(it != listen_fds_.end()){    \
+        op = EPOLL_CTL_MOD; \
+    }   \
+    epoll_event tmp = event->getEpollEvent();   \
+    int rt = epoll_ctl(epoll_fd_, op, event->getFd(), &tmp);    \
+    if(rt == -1){   \
+        ERRORLOG("faild epoll_ctl when add fd [%d:%s], errno=%d, errno=%s", event->getFd(), event->getFdName().c_str(), errno, strerror(errno)); \
+    } else {  \
+        listen_fds_.insert(event->getFd()); \
+    } \
+    DEBUGLOG("add event success, fd [%d:%s], event [%d]", event->getFd(), event->getFdName().c_str(), tmp); \
+```
+### 删除EPOLL事件宏
+与上面类似
+```c++
+#define DEL_TO_EPOLL() \
+    auto it = listen_fds_.find(event->getFd()); \
+    if(it == listen_fds_.end()){ \
+        return; \
+    } \
+    int op = EPOLL_CTL_DEL; \
+    epoll_event tmp = event->getEpollEvent(); \
+    INFOLOG("delete epoll event = %d", tmp); \
+    int rt = epoll_ctl(epoll_fd_, op, event->getFd(), &tmp); \
+    if (rt == -1) { \
+            ERRORLOG("faild epoll_ctl when add fd [%d:%s], errno=%d, errno=%s", event->getFd(), event->getFdName().c_str(), errno, strerror(errno)); \
+    }else { \
+        listen_fds_.erase(event->getFd()); \
+    } \
+    DEBUGLOG("delete event success, fd [%d:%s], event [%d]", event->getFd(), event->getFdName().c_str(), tmp); \
+
 ```
 
 ### eventloop.cc
+#### 初始化与析构
+```c++
+static thread_local EventLoop* t_cur_eventloop = NULL;
+static int g_epoll_max_timeout = 10000;
+static const int g_epoll_max_event = 10;
 
+EventLoop::EventLoop(){
+    if(t_cur_eventloop){
+        ERRORLOG("faild to create event loop, already has a eventloop");
+        exit(0);
+    }
+    tid_ = get_thread_id();
+    
+    epoll_fd_ = epoll_create(1);
+
+    if(epoll_fd_ < 0) {
+        ERRORLOG("failed to create event loop, epoll_create error, error info [%d]", errno);
+        exit(0);
+    }
+
+    initWakeUpFdEvent();
+
+    INFOLOG("success create event loop in thread [%d]", tid_);
+    t_cur_eventloop = this;
+}
+
+EventLoop::~EventLoop(){
+    close(epoll_fd_);
+    if(wakeup_fd_event_){
+        delete wakeup_fd_event_;
+        wakeup_fd_event_ = NULL;
+    }
+}
+
+void EventLoop::initWakeUpFdEvent(){
+    wakeup_fd_ = eventfd(0, EFD_NONBLOCK);
+    if(wakeup_fd_ <= 0){
+        ERRORLOG("failed to create event loop, eventfd create error, error info [%d]", errno);
+        exit(0);
+    }
+
+    wakeup_fd_event_ = new WakeUpFdEvent(wakeup_fd_);
+    wakeup_fd_event_->listen(TriggerEvent::IN_EVENT, 
+        [this]()->void{
+            char buf[8];
+            // -1&&EAGAIN 说明读完了
+            while(read(wakeup_fd_, buf, 8) != -1 && errno != EAGAIN){
+
+            }
+            DEBUGLOG("read full bytes from wakeup fd[%d]", wakeup_fd_);
+        }
+    );    {}
+
+    addEpollEvent(wakeup_fd_event_);
+}
+```
+
+#### 主循环
+```c++
+void EventLoop::loop(){
+    while(!stop_){
+        ScopeMutex<Mutex> lock(mutex_);
+        std::queue<std::function<void()>> tmp_tasks;
+        tasks_.swap(tmp_tasks);
+        lock.unlock();
+
+        while(!tmp_tasks.empty()){
+            auto cb = tmp_tasks.front();
+            tmp_tasks.pop();
+            if(cb) cb();
+        }
+
+        int timeout = g_epoll_max_timeout;
+        epoll_event result_event[g_epoll_max_event];
+        int rt = epoll_wait(epoll_fd_, result_event, g_epoll_max_event, timeout);
+
+        if(rt < 0){
+            ERRORLOG("epoll_wait error, errno=%d", errno);
+            exit(0);
+        }
+        for(int i = 0;i < rt ;++ i){
+            epoll_event trigger_event = result_event[i];
+            FdEvent *fd_event = static_cast<FdEvent*>(trigger_event.data.ptr);
+            if(fd_event == NULL) {
+                continue;
+            }
+
+            if(trigger_event.events & EPOLLIN){
+                DEBUGLOG("fd [%d:%s] trigger EPOLLIN event", fd_event->getFd(), fd_event->getFdName().c_str());
+                addTask(fd_event->handler(TriggerEvent::IN_EVENT));
+            }else if(trigger_event.events & EPOLLOUT){
+                DEBUGLOG("fd [%d:%s] trigger EPOLLOUT event", fd_event->getFd(), fd_event->getFdName().c_str());
+                addTask(fd_event->handler(TriggerEvent::OUT_EVENT));
+            }
+
+        }
+    }
+}
+```
+#### 辅助函数
+``` c++
+void EventLoop::wakeup(){
+    wakeup_fd_event_->wakeup();
+}
+
+void EventLoop::stop(){
+    stop_ = true;
+}
+
+void EventLoop::dealWakeup(){
+
+}
+```
+#### 添加/删除EPOLL操作
+
+```c++
+void EventLoop::addEpollEvent(FdEvent* event){
+    if(isInLoopThread()){
+        ADD_TO_EPOLL();
+    }else{
+        auto callback = [this, event]()->void{
+            ADD_TO_EPOLL();
+        };    {}
+        addTask(callback,true);
+    }
+}
+
+void EventLoop::delEpollEvent(FdEvent* event){
+    if(isInLoopThread()){
+        DEL_TO_EPOLL();
+    }else{
+        auto callback = [this, event]()->void{
+            DEL_TO_EPOLL();
+        };    {}
+        addTask(callback,true);
+    }
+}
+
+bool EventLoop::isInLoopThread(){
+    return get_thread_id() == tid_;
+}
+
+// 添加到队列中
+void EventLoop::addTask(std::function<void()> callback,  bool is_wake_up /*=false*/){
+    ScopeMutex<Mutex> lock(mutex_);
+    tasks_.push(callback);
+    lock.unlock();
+
+    if(is_wake_up){
+        wakeup();
+    }
+}
+```
 
 # TCP  
 参考muduo  
@@ -735,5 +901,107 @@ RpcChannel和RpcAsyncChannel
 日志完善和优化  
 代码生成工具脚手架封装  
 项目构建与测试  
+
+# 测试
+## log
+``` c++
+#include "config.h"
+#include "log.h"
+#include <cstddef>
+#include <pthread.h>
+#include <string>
+
+void *func(void*){
+    int i = 100;
+    while (i --){
+        DEBUGLOG("this is thread in %s", "func");
+        INFOLOG("this is thread in %s", "func");
+        ERRORLOG("this is thread in %s", "func");
+    }
+
+    return NULL;
+}
+
+int main(){
+
+    lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
+    lrpc::Logger::SetGlobalLogger();
+
+    pthread_t thread;
+    pthread_create(&thread, NULL, func, NULL);
+
+    int i = 100;
+    while (i --){ 
+        DEBUGLOG("test debug log %s", std::to_string(i).c_str());
+        INFOLOG("test info log %s", std::to_string(i).c_str());
+        ERRORLOG("test error log %s", std::to_string(i).c_str());
+    }
+    pthread_join(thread, NULL);
+
+    return 0;
+}
+```
+## eventloop
+``` c++
+#include "config.h"
+#include "fd_event.h"
+#include "lrpc/net/eventloop.h"
+#include "lrpc/common/log.h"
+#include <strings.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+int main(){
+    lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
+    lrpc::Logger::SetGlobalLogger();
+
+    lrpc::EventLoop* eventloop = new lrpc::EventLoop();
+
+    int listenfd = socket(AF_INET, SOCK_STREAM, 0);
+    if(listenfd == -1){
+        ERRORLOG("listenfd = -1");
+        exit(0);
+    }
+
+    sockaddr_in addr;
+    bzero(&addr, sizeof(addr));
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(12345);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    int rt = bind(listenfd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    if(rt == -1){
+        ERRORLOG("bind error");
+        exit(1);
+    }
+    
+    rt = listen(listenfd, 100);
+    if(rt == -1){
+        ERRORLOG("listen error");
+        exit(1);
+    }
+
+    lrpc::FdEvent event(listenfd, "(port:12345)");
+    event.listen(lrpc::IN_EVENT, [listenfd]()->void{
+        sockaddr_in peer_addr;
+        socklen_t addr_len = sizeof(peer_addr);
+
+        bzero(&peer_addr, sizeof(peer_addr));
+        int clientfd = accept(listenfd, reinterpret_cast<sockaddr*>(&peer_addr), &addr_len);
+        clientfd += 0;
+
+        DEBUGLOG("success get client [%s:%d]", inet_ntoa(peer_addr.sin_addr), ntohs(peer_addr.sin_port));
+
+    }); {}
+
+    eventloop->addEpollEvent(&event);
+
+    eventloop->loop();
+
+    return 0;
+}
+```
 # 结语
 实现了一个轻量级C++ RPC框架，基于 Reactor 架构，单机可达100KQPS。项目参考了muduo 网络框架，包含代码生成工具、异步日志。通过本项目我熟悉了RPC通信原理，Reactor 架构，Linux 下后台开发知识。

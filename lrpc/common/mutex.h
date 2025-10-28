@@ -64,4 +64,4 @@ private:
     pthread_mutex_t mutex_;
 };
 
-}
+} // namespace lrpc
