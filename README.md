@@ -30,6 +30,15 @@
       - [主循环](#主循环)
       - [辅助函数](#辅助函数)
       - [添加/删除EPOLL操作](#添加删除epoll操作)
+  - [TimerEvent](#timerevent)
+    - [timer\_event.h](#timer_eventh)
+    - [timer\_event.cc](#timer_eventcc)
+  - [Timer](#timer)
+    - [timer.h](#timerh)
+    - [timer.cc](#timercc)
+      - [addTimerEvent/deleteTimerEvent](#addtimereventdeletetimerevent)
+      - [onTimer](#ontimer)
+      - [resetArriveTime](#resetarrivetime)
 - [TCP](#tcp)
 - [RPC](#rpc)
   - [协议封装](#协议封装)
@@ -340,23 +349,30 @@ if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Debug) {
 }
 ```
 ```c++
+
 #define DEBUGLOG(str, ...)\
     if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Debug) {\
-        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Debug))->toString() + "[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]\t" + lrpc::formatString(str, #__VA_ARGS__) + "\n"; \
+        char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
+        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Debug))->toString() + _locBuf \
+        + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
         lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
         lrpc::Logger::  GetGlobalLogger()->log();\
     }\
 
 #define INFOLOG(str, ...)\
     if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Info) {\
-        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Info))->toString() + "[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]\t" + lrpc::formatString(str, #__VA_ARGS__) + "\n"; \
+        char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
+        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Info))->toString() + _locBuf  \
+        + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
         lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
         lrpc::Logger::  GetGlobalLogger()->log();\
     }\
 
 #define ERRORLOG(str, ...)\
     if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Error) {\
-        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Error))->toString() + "[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]\t" + lrpc::formatString(str, #__VA_ARGS__) + "\n"; \
+        char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
+        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Error))->toString() + _locBuf  \
+        + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
         lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
         lrpc::Logger::  GetGlobalLogger()->log();\
     }\
@@ -881,7 +897,253 @@ void EventLoop::addTask(std::function<void()> callback,  bool is_wake_up /*=fals
     }
 }
 ```
+## TimerEvent
+一个定时器事件的封装, 包含触发时间, 间隔, 是否取消, 是否重复。
+### timer_event.h
+```c++
+class TimerEvent{
+public:
+    typedef std::shared_ptr<TimerEvent> s_ptr;
 
+    TimerEvent(int internal, bool is_repeated, std::function<void()> callback);
+
+public:
+    void setArriveTime();
+
+    int64_t getArriveTime() const { return arrive_time_; }
+
+    bool isCanceled() const { return is_canceled_; }
+
+    void setCanceled(bool c) { is_canceled_ = c; }
+
+    bool isRepeated() const { return is_repeated_; }
+
+    void setRepeated(bool r) { is_repeated_ = r; }
+
+    std::function<void()> getCallBack() { return task_; }
+
+private:
+    int64_t arrive_time_;
+    int64_t internal_;
+    bool is_repeated_{false};
+    bool is_canceled_{false};
+
+    std::function<void()> task_;
+};
+```
+### timer_event.cc
+```c++
+TimerEvent::TimerEvent(int internal, bool is_repeated, std::function<void()> callback)
+        :internal_(internal), is_repeated_(is_repeated), task_(callback){
+    // 
+    arrive_time_ = get_now_ms() + internal_;
+    DEBUGLOG("success create timer event, will execute at [%lld]", arrive_time_);
+}
+
+void TimerEvent::setArriveTime(){
+    arrive_time_ = arrive_time_ + internal_;
+    // int64_t now = get_now_ms();
+    // if (arrive_time_ < now) {
+    //     arrive_time_ = now + (internal_ - (now - arrive_time_) % internal_);
+    // }
+    DEBUGLOG("reset timer event, will execute at [%lld]", arrive_time_);
+}
+```
+## Timer
+定时器事件封装, 除了下面的实现我觉得也可以控制往WakeUpFd写入数据来触发epoll_wait, 性能未知。
+
+最重要的是 `timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC)` 创建一个fd  
+和 `timerfd_settime(getFd(), 0, &value, NULL)` 让内核在timespec规定的事件触发一次EPOLLIN  
+所以需要listen(IN_EVENT, bind(ontimer))  
+在ontimer中会顺序执行定时器记录的所有任务  
+在eventloop中添加定时器后, 定时器会周期性的timerfd_settime让内核通知epoll有写入事件, 随后会调用这里的ontimer回调执行定时任务, ontimer中会再次设置timerfd_settime。
+### timer.h
+```c++
+class Timer:public FdEvent{
+public:
+    Timer();
+    
+    ~Timer();
+
+public:
+    void addTimerEvent(TimerEvent::s_ptr event);
+
+    void deleteTimerEvent(TimerEvent::s_ptr event);
+
+    void onTimer(); // 发生IO事件后, eventloop会执行这个函数
+
+private:
+    std::multimap<int64_t, TimerEvent::s_ptr> events_;
+    Mutex mutex_;
+
+private:
+    void resetArriveTime();
+};
+```
+### timer.cc
+```c++
+Timer::Timer(): FdEvent(timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC), "TIMER"){
+    
+    INFOLOG("timer init,\t fd=%d", getFd());
+
+    // 把fd的可读事件放到event上监听
+    listen(FdEvent::IN_EVENT, std::bind(&Timer::onTimer, this));
+}
+
+Timer::~Timer(){
+
+}
+```
+#### addTimerEvent/deleteTimerEvent
+访问mutimap前加锁  
+
+添加  
+如果被添加的event的触发事件＞队首的event的触发时间, 需要让内核在新的时间通知自己。
+
+删除  
+遍历events找到要删除的事件删除
+```c++
+void Timer::addTimerEvent(TimerEvent::s_ptr event){
+    bool is_reset_timerfd = false;
+
+    ScopeMutex<Mutex> lock(mutex_);
+    if(events_.empty()){
+        is_reset_timerfd = true;
+    }else{
+        auto it = events_.begin();
+        if((*it).second->getArriveTime() > event->getArriveTime()){
+            is_reset_timerfd = true;
+        }
+    }
+    events_.emplace(event->getArriveTime(), event);
+    lock.unlock();
+
+    if(is_reset_timerfd){
+        resetArriveTime();
+    }
+    DEBUGLOG("success add TimerEvent at arrivetime %lld", event->getArriveTime());
+}
+
+void Timer::deleteTimerEvent(TimerEvent::s_ptr event){
+    event->setCanceled(true);
+
+    ScopeMutex<Mutex> lock(mutex_);
+
+    auto begin = events_.lower_bound(event->getArriveTime());
+    auto end = events_.upper_bound(event->getArriveTime());
+
+    auto it = begin;
+    for(it = begin; it != end ; ++ it){
+        if(it->second == event){
+            break;
+        }
+    }
+    if(it != end) { 
+        events_.erase(it);
+    }
+
+    lock.unlock();
+    DEBUGLOG("success delete TimerEvent at arrivetime %lld", event->getArriveTime());
+}
+```
+#### onTimer
+先消费timerfd的内容。  
+随后遍历events, 备份到期的事件并删除, 同时保存其回调  
+遍历保存的到期任务, 如果是重复任务就重置下一次执行的事件, 再次添加到events中
+遍历回调并执行  
+```c++
+void Timer::onTimer(){
+    // 处理缓冲区
+    char buf[8];
+    while(1){
+        if((read(getFd(), buf, 8) == -1) && errno == EAGAIN){
+            break;
+        }
+    }
+
+    // 执行定时任务
+    int64_t now = get_now_ms();
+    DEBUGLOG("ontime at %lld", now);
+    std::vector<TimerEvent::s_ptr> tmps;
+    std::vector<std::pair<uint64_t, std::function<void()>>> tasks;
+
+    ScopeMutex<Mutex> lock(mutex_);
+    auto it = events_.begin();
+
+    for(it = events_.begin(); it != events_.end(); ++ it){
+        // 如果到期
+        if((*it).second->getArriveTime() < now ){
+            if(!(*it).second->isCanceled()){
+                tmps.emplace_back((*it).second);
+                tasks.emplace_back(std::make_pair((*it).second->getArriveTime(), (*it).second->getCallBack()));
+            }
+        // 没有到期说明后面的也没到期
+        } else {
+            break;
+        }
+    }
+
+    events_.erase(events_.begin(), it);
+    lock.unlock();
+
+    // 重新添加event
+    for(auto i = tmps.begin(); i != tmps.end(); ++i){
+        if((*i)->isRepeated()){
+            (*i)->setArriveTime();
+            addTimerEvent((*i));
+        }
+    }
+
+    resetArriveTime();
+
+    for(auto p = tasks.begin(); p != tasks.end(); ++p){
+        if(p->second) p->second();
+    }
+}
+```
+#### resetArriveTime
+重要
+
+大体意思是, 如果最近的任务已经过时了, 让内核尽快通知自己去执行。
+如果最近的任务还没执行, 让内核在对应的事件通知自己。
+```c++
+void Timer::resetArriveTime(){
+    ScopeMutex<Mutex> lock(mutex_);
+    auto tmp = events_;
+    lock.unlock();
+
+    if(tmp.empty()){
+        return;
+    }
+
+    int64_t now = get_now_ms();
+    int64_t internal;
+    auto it = tmp.begin();
+    // 如果第一个任务还没执行, 设置间隔为
+    if(it->second->getArriveTime() > now){
+        internal = it->second->getArriveTime() - now;
+    } else {
+        internal = 100;
+    }
+    DEBUGLOG("reset arrive time internal:%lld", internal);
+
+    // s -> ms -> us -> ns
+    timespec ts;
+    bzero(&ts, sizeof(ts));
+    ts.tv_sec = internal / 1000;
+    ts.tv_nsec = (internal % 1000) * 1000000;
+
+    itimerspec value;
+    bzero(&value, sizeof(value));
+    value.it_value = ts;
+
+    // 告诉内核多久后唤醒我
+    int rt = timerfd_settime(getFd(), 0, &value, NULL);
+    if( rt != 0 ){
+        ERRORLOG("timerfd_settime error, errno=%d, error=%s", errno, strerror(errno));
+    }
+}
+```
 # TCP  
 参考muduo  
 TcpBuffer  
