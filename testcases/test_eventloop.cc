@@ -1,7 +1,10 @@
-#include "config.h"
-#include "fd_event.h"
+#include "lrpc/common/config.h"
+#include "lrpc/net/fd_event.h"
+#include "lrpc/common/util.h"
 #include "lrpc/net/eventloop.h"
 #include "lrpc/common/log.h"
+#include "timer_event.h"
+#include <memory>
 #include <strings.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -38,8 +41,9 @@ int main(){
         exit(1);
     }
 
+    // 连接接收任务
     lrpc::FdEvent event(listenfd, "(port:12345)");
-    event.listen(lrpc::IN_EVENT, [listenfd]()->void{
+    event.listen(lrpc::FdEvent::IN_EVENT, [listenfd]()->void{
         sockaddr_in peer_addr;
         socklen_t addr_len = sizeof(peer_addr);
 
@@ -52,6 +56,20 @@ int main(){
     });
 
     eventloop->addEpollEvent(&event);
+
+    // 定时器任务
+    int i = 0;
+    lrpc::TimerEvent::s_ptr timer_event = std::make_shared<lrpc::TimerEvent>(
+        1000, true , [&i]()->void{
+            static int64_t last = lrpc::get_now_ms();
+            int64_t now = lrpc::get_now_ms();
+            printf("timer %d interval = %lld ms\n", i++, now - last);
+            last = now;
+        }
+    );
+
+    eventloop->addTimerEvent(timer_event);
+
 
     eventloop->loop();
 

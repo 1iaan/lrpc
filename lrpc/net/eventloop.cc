@@ -62,7 +62,8 @@ EventLoop::EventLoop(){
         exit(0);
     }
 
-    initWakeUpFdEvent();
+    initWakeUpFdEvent(); 
+    initTimer();
 
     INFOLOG("success create event loop in thread [%d]", tid_);
     t_cur_eventloop = this;
@@ -84,7 +85,7 @@ void EventLoop::initWakeUpFdEvent(){
     }
 
     wakeup_fd_event_ = new WakeUpFdEvent(wakeup_fd_);
-    wakeup_fd_event_->listen(TriggerEvent::IN_EVENT, 
+    wakeup_fd_event_->listen(FdEvent::IN_EVENT, 
         [this]()->void{
             char buf[8];
             // -1&&EAGAIN 说明读完了
@@ -97,8 +98,14 @@ void EventLoop::initWakeUpFdEvent(){
     addEpollEvent(wakeup_fd_event_);
 }
 
+void EventLoop::initTimer(){
+    timer_ = new Timer();
+    addEpollEvent(timer_);
+}
+
 void EventLoop::loop(){
     while(!stop_){
+        /* 执行 tasks_  */
         ScopeMutex<Mutex> lock(mutex_);
         std::queue<std::function<void()>> tmp_tasks;
         tasks_.swap(tmp_tasks);
@@ -109,6 +116,10 @@ void EventLoop::loop(){
             tmp_tasks.pop();
             if(cb) cb();
         }
+
+        /* 如果有定时任务需要执行，在这里执行 */
+        /* 1. now() >= timerEvent.arrtive_time */
+        /* 2. 如何让eventloop 监听 */
 
         int timeout = g_epoll_max_timeout;
         epoll_event result_event[g_epoll_max_event];
@@ -127,10 +138,10 @@ void EventLoop::loop(){
 
             if(trigger_event.events & EPOLLIN){
                 DEBUGLOG("fd [%d:%s] trigger EPOLLIN event", fd_event->getFd(), fd_event->getFdName().c_str());
-                addTask(fd_event->handler(TriggerEvent::IN_EVENT));
+                addTask(fd_event->handler(FdEvent::IN_EVENT));
             }else if(trigger_event.events & EPOLLOUT){
                 DEBUGLOG("fd [%d:%s] trigger EPOLLOUT event", fd_event->getFd(), fd_event->getFdName().c_str());
-                addTask(fd_event->handler(TriggerEvent::OUT_EVENT));
+                addTask(fd_event->handler(FdEvent::OUT_EVENT));
             }
 
         }
@@ -183,6 +194,10 @@ void EventLoop::addTask(std::function<void()> callback,  bool is_wake_up /*=fals
     if(is_wake_up){
         wakeup();
     }
+}
+
+void EventLoop::addTimerEvent(TimerEvent::s_ptr event){
+    timer_->addTimerEvent(event);
 }
 
 } // namespace lrpc

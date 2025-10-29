@@ -7,6 +7,10 @@
 
 namespace lrpc{
 
+FdEvent::FdEvent(){
+    
+}
+
 FdEvent::FdEvent(int fd): fd_(fd){
     fd_name_ = "fd_" + std::to_string(fd);
     memset(&listen_events_, 0, sizeof(listen_events_));
@@ -25,10 +29,10 @@ FdEvent::~FdEvent(){
 
 std::function<void()> FdEvent::handler(TriggerEvent ev_t){
     switch (ev_t) {
-        case TriggerEvent::IN_EVENT:{
+        case FdEvent::IN_EVENT:{
             return read_callback_;
         }
-        case TriggerEvent::OUT_EVENT:{
+        case FdEvent::OUT_EVENT:{
             return write_callback_;            
         }
         default:
@@ -38,12 +42,12 @@ std::function<void()> FdEvent::handler(TriggerEvent ev_t){
 
 void FdEvent::listen(TriggerEvent ev_t, std::function<void()> callback){
     switch (ev_t) {
-        case TriggerEvent::IN_EVENT:{
+        case FdEvent::IN_EVENT:{
             listen_events_.events |= EPOLLIN;
             read_callback_ = callback;
             break;
         }
-        case TriggerEvent::OUT_EVENT:{
+        case FdEvent::OUT_EVENT:{
             listen_events_.events |= EPOLLOUT;
             write_callback_ = callback;       
             break; 
@@ -55,7 +59,7 @@ void FdEvent::listen(TriggerEvent ev_t, std::function<void()> callback){
 
 
 WakeUpFdEvent::WakeUpFdEvent(int fd) : FdEvent(fd, "WAKEUP"){
-
+    INFOLOG("wakeup init,\t fd=%d", getFd());
 }
 
 WakeUpFdEvent::~WakeUpFdEvent(){

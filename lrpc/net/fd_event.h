@@ -5,14 +5,16 @@
 
 namespace lrpc{
 
-enum TriggerEvent {
-    IN_EVENT = EPOLLIN,
-    OUT_EVENT = EPOLLOUT,
-};
+
 
 class FdEvent{
 public:
+    enum TriggerEvent {
+        IN_EVENT = EPOLLIN,
+        OUT_EVENT = EPOLLOUT,
+    };
 
+    FdEvent();
     FdEvent(int fd);
     FdEvent(int fd, std::string fd_name);
     
@@ -23,7 +25,8 @@ public:
     void listen(TriggerEvent ev_t, std::function<void()> callback);
 
     int getFd() const { return fd_; }
-    std::string getFdName() { return fd_name_; }
+    std::string getFdName() const { return fd_name_; }
+    void setFdName(std::string name) { fd_name_ = name; }
 
     epoll_event getEpollEvent() { return listen_events_; }
 
