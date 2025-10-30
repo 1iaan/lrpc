@@ -13,10 +13,6 @@ TimerEvent::TimerEvent(int internal, bool is_repeated, std::function<void()> cal
 
 void TimerEvent::setArriveTime(){
     arrive_time_ = arrive_time_ + internal_;
-    // int64_t now = get_now_ms();
-    // if (arrive_time_ < now) {
-    //     arrive_time_ = now + (internal_ - (now - arrive_time_) % internal_);
-    // }
     DEBUGLOG("reset timer event, will execute at [%lld]", arrive_time_);
 }
  

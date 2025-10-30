@@ -65,7 +65,7 @@ std::string LogEvent::toString(){
     strftime(&buf[0], 128, "%y-%m-%d %H:%M:%S", &now_time_t);
     
     ctime_ = buf;
-    int ms = now_time.tv_usec * 1000;
+    int ms = now_time.tv_usec / 1000;
     ctime_ = ctime_ + "." + std::to_string(ms);
 
     pid_ = get_process_id();

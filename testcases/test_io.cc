@@ -1,7 +1,9 @@
+#include "eventloop.h"
+#include "lrpc/net/io_thread.h"
+#include "lrpc/net/io_thread_group.h"
 #include "lrpc/common/config.h"
 #include "lrpc/net/fd_event.h"
 #include "lrpc/common/util.h"
-#include "lrpc/net/eventloop.h"
 #include "lrpc/common/log.h"
 #include "timer_event.h"
 #include <memory>
@@ -10,11 +12,10 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-int main(){
+
+void test_io(){
     lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
     lrpc::Logger::SetGlobalLogger();
-
-    lrpc::EventLoop* eventloop = new lrpc::EventLoop();
 
     int listenfd = socket(AF_INET, SOCK_STREAM, 0);
     if(listenfd == -1){
@@ -55,7 +56,7 @@ int main(){
 
     });
 
-    eventloop->addEpollEvent(&event);
+
 
     // 定时器任务
     int i = 0;
@@ -63,15 +64,34 @@ int main(){
         1000, true , [&i]()->void{
             static int64_t last = lrpc::get_now_ms();
             int64_t now = lrpc::get_now_ms();
-            DEBUGLOG("--timer %d interval = %ld ms", i++, now - last);
+            printf("thread[%d] timer %d interval = %ld ms\n",lrpc::get_thread_id(),  i++, now - last);
             last = now;
         }
     );
 
-    eventloop->addTimerEvent(timer_event);
+    // loop 是本线程执行的，必须先添加event再loop, 其他线程可以等loop跑起来再添加event
+    // lrpc::IOThread io_thread;
+    // io_thread.getEventloop()->addEpollEvent(&event);
+    // io_thread.getEventloop()->addTimerEvent(timer_event);
+    // io_thread.start();
+    // DEBUGLOG("start io eventloop");
+    // io_thread.join();
+    // DEBUGLOG("jion io eventloop");
 
+    lrpc::IOThreadGroup io_thread_group(2);
+    lrpc::IOThread *io_thread = io_thread_group.getIOThread();
+    io_thread->getEventloop()->addEpollEvent(&event);
+    io_thread->getEventloop()->addTimerEvent(timer_event);
 
-    eventloop->loop();
+    lrpc::IOThread *io_thread2 = io_thread_group.getIOThread();
+    io_thread2->getEventloop()->addTimerEvent(timer_event);
 
+    io_thread_group.start();
+    io_thread_group.join();
+
+}
+
+int main(){
+    test_io();
     return 0;
 }

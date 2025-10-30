@@ -92,7 +92,6 @@ void Timer::onTimer(){
 
     // 执行定时任务
     int64_t now = get_now_ms();
-    DEBUGLOG("ontime at %lld", now);
     std::vector<TimerEvent::s_ptr> tmps;
     std::vector<std::pair<uint64_t, std::function<void()>>> tasks;
 
@@ -101,7 +100,7 @@ void Timer::onTimer(){
 
     for(it = events_.begin(); it != events_.end(); ++ it){
         // 如果到期
-        if((*it).second->getArriveTime() < now ){
+        if((*it).second->getArriveTime() <= now ){
             if(!(*it).second->isCanceled()){
                 tmps.emplace_back((*it).second);
                 tasks.emplace_back(std::make_pair((*it).second->getArriveTime(), (*it).second->getCallBack()));
@@ -123,6 +122,7 @@ void Timer::onTimer(){
         }
     }
 
+    DEBUGLOG("Ontimer trigger event size %d:%d", tmps.size(), tasks.size());
     resetArriveTime();
 
     for(auto p = tasks.begin(); p != tasks.end(); ++p){
@@ -143,11 +143,9 @@ void Timer::resetArriveTime(){
     int64_t internal;
     auto it = tmp.begin();
     // 如果第一个任务还没执行, 设置间隔为
-    if(it->second->getArriveTime() > now){
-        internal = it->second->getArriveTime() - now;
-    } else {
-        internal = 100;
-    }
+    internal = it->second->getArriveTime() - now;
+    if(internal <= 0) internal = 10;
+
     DEBUGLOG("reset arrive time internal:%lld", internal);
 
     // s -> ms -> us -> ns

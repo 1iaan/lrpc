@@ -39,6 +39,11 @@
       - [addTimerEvent/deleteTimerEvent](#addtimereventdeletetimerevent)
       - [onTimer](#ontimer)
       - [resetArriveTime](#resetarrivetime)
+  - [IO 线程](#io-线程)
+    - [io\_thread.h](#io_threadh)
+    - [io\_thread.cpp](#io_threadcpp)
+    - [io\_thread\_group.h](#io_thread_grouph)
+    - [io\_thread\_group.cc](#io_thread_groupcc)
 - [TCP](#tcp)
 - [RPC](#rpc)
   - [协议封装](#协议封装)
@@ -1144,6 +1149,165 @@ void Timer::resetArriveTime(){
     }
 }
 ```
+
+## IO 线程
+创建一个IO线程，他会帮我们执行：
+1. 创建一个新线程
+2. 在新线程里创建一个eventloop完成初始化
+3. 开启loop循环
+
+信号量 semaphore  
+init  
+1. sem_t *sem: 指向要初始化的信号量对象的指针
+2. int pshared: 控制信号量的共享范围
+   1. 0: 信号量将在当前进程的线程之间共享
+   2. !0: 信号量可以在多个进程之间共享
+3. unsigned int value: 信号量的初始值
+   1. 1: 二进制信号量, 0/1, 互斥锁
+   2. 0: 用于线程执行顺序的同步
+   3. N: 计数信号量, 每当一个线程获取一个连接时，信号量减1；当连接被归还时，信号量加1。
+post: +1  
+wait: -1  
+destory  
+### io_thread.h
+封装EventLoop, 初始化一个线程去执行,   
+注意这里必须在start前完成AddEpollEvent, 否则只能由其他线程来AddEpollEvent（本线程会被阻塞在loop中）。
+```c++
+class IOThread{
+public:
+    IOThread();
+
+    ~IOThread();
+
+public:
+    static void* Main(void *args);
+
+    EventLoop* getEventloop() const { return eventloop_; }
+
+    void start();
+
+    void join();
+
+private:
+    pid_t tid_ {0};                // 线程号
+    pthread_t thread_ {0};         // 线程句柄
+    EventLoop* eventloop_ {NULL};   // io线程的loop
+
+    sem_t init_semaphore_;
+    sem_t start_semaphore_;
+};
+```
+### io_thread.cpp
+```c++
+IOThread::IOThread(){
+    int rt = sem_init(&init_semaphore_, 0, 0);
+    assert(rt == 0);
+    rt = sem_init(&start_semaphore_, 0, 0);
+    assert(rt == 0);
+    pthread_create(&thread_, NULL, &IOThread::Main, this);
+
+    // 需要等到Main函数的eventloop循环启动才返回
+    sem_wait(&init_semaphore_);
+
+    DEBUGLOG("IOThread [%d] create success", tid_);
+}
+
+IOThread::~IOThread(){
+    if(eventloop_) eventloop_->stop();
+    sem_destroy(&init_semaphore_);
+    pthread_join(thread_, NULL);
+
+    if(eventloop_){
+        delete eventloop_;
+        eventloop_ = NULL;
+    }
+}
+
+void* IOThread::Main(void *args){
+    IOThread* thread = static_cast<IOThread*>(args);
+
+    thread->eventloop_ = new EventLoop();
+    thread->tid_ = get_thread_id();
+
+    sem_post(&thread->init_semaphore_);
+
+    DEBUGLOG("IOThread [%d] wait start", thread->tid_);
+    sem_wait(&thread->start_semaphore_);
+
+    DEBUGLOG("IOThread [%d] start eventloop", thread->tid_);
+    thread->eventloop_->loop();
+    DEBUGLOG("IOThread [%d] end eventloop", thread->tid_);
+    return nullptr;
+}
+
+void IOThread::start(){
+    sem_post(&start_semaphore_);
+}
+
+void IOThread::join(){
+    pthread_join(thread_, NULL);
+}
+```
+### io_thread_group.h
+一个池
+```c++
+class IOThreadGroup{
+public:
+    IOThreadGroup(int size);
+    
+    ~IOThreadGroup();
+
+public: 
+    void start();
+
+    void join();
+
+    IOThread* getIOThread();
+
+public:
+
+private:
+    int size_;
+    int index_;
+    std::vector<IOThread*> io_thread_groups_;
+};
+```
+
+### io_thread_group.cc
+```c++
+IOThreadGroup::IOThreadGroup(int size): size_(size){
+    io_thread_groups_.resize(size);
+    for(int i =0;i < size; ++i){
+        io_thread_groups_[i] = new IOThread();
+    }
+}
+    
+IOThreadGroup::~IOThreadGroup(){
+
+}
+
+void IOThreadGroup::start(){
+    for(int i = 0;i < size_; ++ i){
+        io_thread_groups_[i]->start();
+    }
+}
+
+void IOThreadGroup::join(){
+    for(int i = 0;i < size_; ++ i){
+        io_thread_groups_[i]->join();
+    }
+}
+
+IOThread* IOThreadGroup::getIOThread(){
+    if(index_ >= io_thread_groups_.size() || index_ == -1){
+        index_ = 0;
+    }
+    return io_thread_groups_[index_++];
+}
+```
+
+信号量 semaphore, sem_init, sem_wait, 等待信号量+1返回。
+
 # TCP  
 参考muduo  
 TcpBuffer  
