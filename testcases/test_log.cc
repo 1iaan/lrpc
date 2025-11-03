@@ -1,5 +1,5 @@
-#include "config.h"
-#include "log.h"
+#include "lrpc/common/log.h"
+#include "lrpc/common/config.h"
 #include <cstddef>
 #include <pthread.h>
 #include <string>

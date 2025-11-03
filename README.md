@@ -45,6 +45,11 @@
     - [io\_thread\_group.h](#io_thread_grouph)
     - [io\_thread\_group.cc](#io_thread_groupcc)
 - [TCP](#tcp)
+  - [TcpBuffer](#tcpbuffer)
+  - [TcpAcceptor](#tcpacceptor)
+  - [TcpServer](#tcpserver)
+  - [TcpConnection](#tcpconnection)
+  - [TcpClient](#tcpclient)
 - [RPC](#rpc)
   - [协议封装](#协议封装)
   - [模块封装](#模块封装)
@@ -1310,10 +1315,28 @@ IOThread* IOThreadGroup::getIOThread(){
 
 # TCP  
 参考muduo  
-TcpBuffer  
-TcpClient  
-TcpServer  
-TcpConnection  
+## TcpBuffer  
+负责把发送的数据写入Buffer然后从Buffer写入到发送缓冲区,  
+或者把接收缓冲区里的数据读到Buffer中。
+
+为什么需要应用层Buffer
+- 方便数据处理, 堆应用层的包进行组装、拆解。Tcp粘包：对Tcp没有包的概念, 传输的是二进制字节流。
+包是应用层的, 可能Tcp接收到的数据并不是完整的应用层的包, 而是一半。这个时候就要先写入Buffer。
+- 方便异步发送, 发送数据到缓冲区里, eventloop自己从缓冲区里拿数据发送。不需要同步等待。
+- 提高一个发送效率，可以多包合并发送。
+
+readindex/writeindex  
+size = (writeindex-readindex+buffersize)%buffersize
+## TcpAcceptor
+socket-bind-listen-accept   
+SO_REUSEADDR 监听一个套接字，然后服务器关闭，重启这个服务，如果是同一个端口可能会报bind错误，addr已经被绑定。  
+因为tcp在主动关闭连接的一方，套接字会变成timewait状态，处于timewait状态会持续占用端口，如果新程序在这个端口启动，bind就会出错。  
+该选项可以重新绑定这个端口。  
+
+## TcpServer  
+![主从Reactor](img/image.png)
+## TcpConnection  
+## TcpClient  
 # RPC  
 ## 协议封装  
 基于Protobuf的RPC协议编码  
