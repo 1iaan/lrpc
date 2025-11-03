@@ -10,6 +10,7 @@
 namespace lrpc {
 
 IOThread::IOThread(){
+    INFOLOG("[IOThread] Start create" );
     int rt = sem_init(&init_semaphore_, 0, 0);
     assert(rt == 0);
     rt = sem_init(&start_semaphore_, 0, 0);
@@ -19,7 +20,7 @@ IOThread::IOThread(){
     // 需要等到Main函数的eventloop循环启动才返回
     sem_wait(&init_semaphore_);
 
-    DEBUGLOG("IOThread [%d] create success", tid_);
+    INFOLOG("[IOThread] Success create in thread [%d]", tid_);
 }
 
 IOThread::~IOThread(){
@@ -41,7 +42,7 @@ void* IOThread::Main(void *args){
 
     sem_post(&thread->init_semaphore_);
 
-    DEBUGLOG("IOThread [%d] wait start", thread->tid_);
+    // DEBUGLOG("IOThread [%d] wait start", thread->tid_);
     sem_wait(&thread->start_semaphore_);
 
     DEBUGLOG("IOThread [%d] start eventloop", thread->tid_);

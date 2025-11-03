@@ -21,7 +21,7 @@ add_library(lrpc STATIC ${COMM_SRC} ${NET_SRC} ${TCP_SRC})
 # 头文件路径
 # ============================================================
 target_include_directories(lrpc PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    # ${CMAKE_CURRENT_SOURCE_DIR}
     # ${PATH_COMM}
     # ${PATH_NET}
     # ${PATH_TCP}

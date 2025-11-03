@@ -35,6 +35,8 @@ public:
 
     void addTimerEvent(TimerEvent::s_ptr event);
 
+    static EventLoop* GetCurEventLoop();
+
 private:
     pid_t tid_{0};
 

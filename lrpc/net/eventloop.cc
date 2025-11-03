@@ -24,7 +24,7 @@
     } else {  \
         listen_fds_.insert(event->getFd()); \
     } \
-    DEBUGLOG("add event success, fd [%d:%s], event [%d]", event->getFd(), event->getFdName().c_str(), tmp); \
+    DEBUGLOG("eventloop [%d] add event success, fd [%d:%s], event [%d]", tid_,  event->getFd(), event->getFdName().c_str(), tmp); \
 
 #define DEL_TO_EPOLL() \
     auto it = listen_fds_.find(event->getFd()); \
@@ -33,14 +33,13 @@
     } \
     int op = EPOLL_CTL_DEL; \
     epoll_event tmp = event->getEpollEvent(); \
-    INFOLOG("delete epoll event = %d", tmp); \
     int rt = epoll_ctl(epoll_fd_, op, event->getFd(), &tmp); \
     if (rt == -1) { \
             ERRORLOG("faild epoll_ctl when add fd [%d:%s], errno=%d, errno=%s", event->getFd(), event->getFdName().c_str(), errno, strerror(errno)); \
     }else { \
         listen_fds_.erase(event->getFd()); \
     } \
-    DEBUGLOG("delete event success, fd [%d:%s], event [%d]", event->getFd(), event->getFdName().c_str(), tmp); \
+    DEBUGLOG("eventloop [%d] delete event success, fd [%d:%s], event [%d]", tid_ , event->getFd(), event->getFdName().c_str(), tmp); \
 
 namespace lrpc{
 
@@ -49,6 +48,7 @@ static int g_epoll_max_timeout = 10000;
 static const int g_epoll_max_event = 10;
 
 EventLoop::EventLoop(){
+    INFOLOG("[Eventloop] Start create");
     if(t_cur_eventloop){
         ERRORLOG("faild to create event loop, already has a eventloop");
         exit(0);
@@ -58,14 +58,14 @@ EventLoop::EventLoop(){
     epoll_fd_ = epoll_create(1);
 
     if(epoll_fd_ < 0) {
-        ERRORLOG("failed to create event loop, epoll_create error, error info [%d]", errno);
+        ERRORLOG("[Eventloop] Failed to create event loop, epoll_create error, error info [%d]", errno);
         exit(0);
     }
 
     initWakeUpFdEvent(); 
     initTimer();
 
-    INFOLOG("success create event loop in thread [%d]", tid_);
+    INFOLOG("[Eventloop] Success create in thread [%d]", tid_);
     t_cur_eventloop = this;
 }
 
@@ -126,7 +126,8 @@ void EventLoop::loop(){
         int rt = epoll_wait(epoll_fd_, result_event, g_epoll_max_event, timeout);
 
         if(rt < 0){
-            ERRORLOG("epoll_wait error, errno=%d", errno);
+            if(errno == EINTR) continue;
+            ERRORLOG("epoll_wait error, errno=%d,error=%s", errno, strerror(errno));
             exit(0);
         }
         for(int i = 0;i < rt ;++ i){
@@ -198,6 +199,13 @@ void EventLoop::addTask(std::function<void()> callback,  bool is_wake_up /*=fals
 
 void EventLoop::addTimerEvent(TimerEvent::s_ptr event){
     timer_->addTimerEvent(event);
+}
+
+EventLoop* EventLoop::GetCurEventLoop(){
+    if(!t_cur_eventloop){
+        t_cur_eventloop = new EventLoop();
+    }   
+    return t_cur_eventloop;
 }
 
 } // namespace lrpc

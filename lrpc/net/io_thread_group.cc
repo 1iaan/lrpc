@@ -1,13 +1,16 @@
 #include "io_thread_group.h"
+#include "lrpc/common/log.h"
 
 
 namespace lrpc{
 
 IOThreadGroup::IOThreadGroup(int size): size_(size){
+    INFOLOG("[IOThreadGroup] Start create");
     io_thread_groups_.resize(size);
     for(int i =0;i < size; ++i){
         io_thread_groups_[i] = new IOThread();
     }
+    INFOLOG("[IOThreadGroup] Success create");
 }
     
 IOThreadGroup::~IOThreadGroup(){

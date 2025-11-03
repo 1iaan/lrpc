@@ -1,6 +1,6 @@
 #include "lrpc/net/tcp/tcp_acceptor.h"
 #include "lrpc/common/log.h"
-#include "net/tcp/net_addr.h"
+#include "lrpc/net/tcp/net_addr.h"
 #include <asm-generic/socket.h>
 #include <cassert>
 #include <cerrno>
@@ -61,7 +61,7 @@ int TcpAcceptor::accept(){
         }
 
         IPNetAddr addr(client_addr);
-        INFOLOG("A client have accept succ, peer addr [%s]", addr.toString().c_str());
+        INFOLOG("[TcpServer] A client have accept success, peer addr [%s]", addr.toString().c_str());
         return client_fd;
         
     }

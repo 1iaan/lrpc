@@ -28,7 +28,7 @@ namespace lrpc{
  */
 Timer::Timer(): FdEvent(timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC), "TIMER"){
     
-    INFOLOG("timer init,\t fd=%d", getFd());
+    INFOLOG("[Timer] timer init,\t fd=%d", getFd());
 
     // 把fd的可读事件放到event上监听
     listen(FdEvent::IN_EVENT, std::bind(&Timer::onTimer, this));

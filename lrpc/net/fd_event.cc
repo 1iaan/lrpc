@@ -59,7 +59,7 @@ void FdEvent::listen(TriggerEvent ev_t, std::function<void()> callback){
 
 
 WakeUpFdEvent::WakeUpFdEvent(int fd) : FdEvent(fd, "WAKEUP"){
-    INFOLOG("wakeup init,\t fd=%d", getFd());
+    INFOLOG("[FdEvent] wakeup init,\t fd=%d", getFd());
 }
 
 WakeUpFdEvent::~WakeUpFdEvent(){

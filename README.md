@@ -4,17 +4,17 @@
 - [前置知识](#前置知识)
 - [环境](#环境)
 - [Config](#config)
-  - [类设计](#类设计)
+  - [config.h](#configh)
   - [xml读取宏](#xml读取宏)
   - [config.cc](#configcc)
 - [Mutex](#mutex)
   - [mutex.h](#mutexh)
   - [参考](#参考)
 - [Logger](#logger)
-  - [类设计](#类设计-1)
+  - [log.cc](#logcc)
   - [formatString](#formatstring)
   - [日志宏](#日志宏)
-  - [log.cc](#logcc)
+  - [log.cc](#logcc-1)
 - [Reactor(EventLoop)](#reactoreventloop)
   - [Reactor 模型概念](#reactor-模型概念)
   - [FdEvent](#fdevent)
@@ -46,8 +46,16 @@
     - [io\_thread\_group.cc](#io_thread_groupcc)
 - [TCP](#tcp)
   - [TcpBuffer](#tcpbuffer)
+    - [tcp\_buffer.h](#tcp_bufferh)
+    - [tcp\_buffer.cc](#tcp_buffercc)
   - [TcpAcceptor](#tcpacceptor)
+    - [net\_addr.h](#net_addrh)
+    - [net\_addr.cc](#net_addrcc)
+    - [tcp\_acceptor.h](#tcp_acceptorh)
+    - [tcp\_acceptor.cc](#tcp_acceptorcc)
   - [TcpServer](#tcpserver)
+    - [tcp\_server.h](#tcp_serverh)
+    - [tcp\_server.cc](#tcp_servercc)
   - [TcpConnection](#tcpconnection)
   - [TcpClient](#tcpclient)
 - [RPC](#rpc)
@@ -76,7 +84,7 @@ tinyxml 2.6.2
 
 # Config
 用xml读取配置文件。  
-## 类设计
+## config.h
 ```c++
 class Config{
 public:
@@ -265,7 +273,7 @@ private:
 日志格式
 `[Level][%y-%m-%d %H:%M:%s.%ms]\t[pid:thread_id]\t[file_name:line][%msg]`   
 
-## 类设计
+## log.cc
 ```c++
 enum class LogLevel{
     Unknown = 0,
@@ -1325,16 +1333,439 @@ IOThread* IOThreadGroup::getIOThread(){
 - 方便异步发送, 发送数据到缓冲区里, eventloop自己从缓冲区里拿数据发送。不需要同步等待。
 - 提高一个发送效率，可以多包合并发送。
 
+循环可扩容数组
+### tcp_buffer.h
+```c++
+class TcpBuffer{
+public:
+    TcpBuffer(size_t size);
+
+    ~TcpBuffer();
+
+public:
+    size_t readable();
+    
+    size_t writeable();
+
+    size_t getReadIdx() { return read_idx_; }
+
+    size_t getWriteIdx() { return write_idx_; }
+
+    void resizeBuffer(size_t new_size);
+
+    void writeToBuf(const char* data, size_t len);
+
+    void readFromBuf(std::vector<char>& re, size_t size);
+
+    void moveReadIndex(size_t len);
+
+    void moveWriteIndex(size_t len);
+private:
+    size_t read_idx_{0};
+    size_t write_idx_{0};
+    size_t size_{0};
+    bool full_{false};
+
+    std::vector<char> buffer_;
+};
+```
+### tcp_buffer.cc
 readindex/writeindex  
 size = (writeindex-readindex+buffersize)%buffersize
+
+```c++
+TcpBuffer::TcpBuffer(size_t size):size_(size){
+    buffer_.resize(size_);
+}
+
+TcpBuffer::~TcpBuffer(){
+
+}
+
+size_t TcpBuffer::readable(){
+if (full_) return size_;
+    if (write_idx_ >= read_idx_) {
+        return write_idx_ - read_idx_;
+    }
+    return size_ - read_idx_ + write_idx_;
+}
+
+size_t TcpBuffer::writeable(){
+    return size_ - readable();
+}
+
+void TcpBuffer::resizeBuffer(size_t new_size){
+    std::vector<char> new_buf(new_size);
+    size_t r = readable();
+    
+    // 手动复制数据，不调用 readFromBuf
+    if (r > 0) {
+        size_t end_data = size_ - read_idx_;
+        if (r <= end_data) {
+            memcpy(&new_buf[0], &buffer_[read_idx_], r);
+        } else {
+            memcpy(&new_buf[0], &buffer_[read_idx_], end_data);
+            memcpy(&new_buf[end_data], &buffer_[0], r - end_data);
+        }
+    }
+    
+    buffer_.swap(new_buf);
+    size_ = new_size;
+    read_idx_ = 0;
+    write_idx_ = r;
+    full_ = (r == size_);
+}
+
+void TcpBuffer::writeToBuf(const char* data, size_t len){
+    if(len > writeable()){
+        // 扩容
+        resizeBuffer(len + size_);
+    }
+    size_t end_space = size_ - write_idx_;
+    if(len <= end_space){
+        memcpy(&buffer_[write_idx_], data, len);
+        write_idx_ = (write_idx_ + len) % size_;
+    } else {
+        memcpy(&buffer_[write_idx_], data, end_space);
+        memcpy(&buffer_[0], data + end_space, len - end_space);
+        write_idx_ = len - end_space;
+    }
+
+    if (write_idx_ == read_idx_) full_ = true;
+}
+
+void TcpBuffer::readFromBuf(std::vector<char>& re, size_t len){
+    size_t avail = readable();
+    if (avail == 0) return;
+    len = std::min(len, avail);
+
+    std::vector<char> tmp(len);
+    size_t end_data = size_ - read_idx_;
+    if (len <= end_data) {
+        memcpy(&tmp[0], &buffer_[read_idx_], len);
+        read_idx_ = (read_idx_ + len) % size_;
+    } else {
+        memcpy(&tmp[0], &buffer_[read_idx_], end_data);
+        memcpy(&tmp[end_data], &buffer_[0], len - end_data);
+        read_idx_ = len - end_data;
+    }
+
+    if (full_) full_ = false;
+    re.swap(tmp);
+}
+
+
+void TcpBuffer::moveWriteIndex(size_t len){
+    if (len == 0) return;
+    
+    size_t avail = writeable();
+    if (len > avail) {
+        len = avail;  // 限制移动长度不超过可写空间
+    }
+    
+    write_idx_ = (write_idx_ + len) % size_;
+    
+    // 更新 full_ 标志
+    if (write_idx_ == read_idx_) {
+        full_ = true;
+    }
+}
+
+void TcpBuffer::moveReadIndex(size_t len){
+    if (len == 0) return;
+    
+    size_t avail = readable();
+    if (len > avail) {
+        len = avail;  // 限制移动长度不超过可读数据
+    }
+    
+    read_idx_ = (read_idx_ + len) % size_;
+    
+    // 更新 full_ 标志
+    if (read_idx_ != write_idx_) {
+        full_ = false;
+    }
+}   
+```
 ## TcpAcceptor
 socket-bind-listen-accept   
 SO_REUSEADDR 监听一个套接字，然后服务器关闭，重启这个服务，如果是同一个端口可能会报bind错误，addr已经被绑定。  
 因为tcp在主动关闭连接的一方，套接字会变成timewait状态，处于timewait状态会持续占用端口，如果新程序在这个端口启动，bind就会出错。  
 该选项可以重新绑定这个端口。  
 
+tcpacceptor负责 1. listen 2. acceptor 3. addepollevent到eventloop
+具体执行由eventloop负责
+### net_addr.h
+对 sockaddr 的封装
+```c++
+class NetAddr{
+
+public:
+    typedef std::shared_ptr<NetAddr> s_ptr;
+
+    virtual sockaddr* getSockAddr() = 0;
+
+    virtual socklen_t getSockLen() = 0;
+
+    virtual int getFamily() = 0;
+
+    virtual std::string toString() = 0;
+
+    virtual bool checkValid() = 0;
+};
+
+class IPNetAddr: public NetAddr{
+
+public:
+    IPNetAddr(const std::string& ip, uint16_t port);
+
+    IPNetAddr(const std::string& addr);
+
+    IPNetAddr(sockaddr_in addr);
+
+    sockaddr* getSockAddr();
+
+    socklen_t getSockLen();
+
+    int getFamily();
+
+    std::string toString();
+
+    bool checkValid();
+
+private:
+    std::string  ip_;
+    uint16_t port_;
+    sockaddr_in addr_;
+};
+```
+### net_addr.cc
+```c++
+IPNetAddr::IPNetAddr(const std::string& ip, uint16_t port):ip_(ip), port_(port){
+    memset(&addr_, 0, sizeof(addr_));
+
+    addr_.sin_family = AF_INET;
+    // inet_addr() 点分十进制IP地址 转换为网络字节序
+    addr_.sin_addr.s_addr = inet_addr(ip_.c_str());
+    // 主机序转换为网络字节序
+    addr_.sin_port = htons(port_);
+}
+
+IPNetAddr::IPNetAddr(const std::string& addr){
+    size_t i = addr.find_first_of(":");
+    if(i == addr.size()){
+        ERRORLOG("invalid ipv4 addr %s", addr.c_str());
+        return ;
+    }
+    ip_ = addr.substr(0, i);
+    port_ = std::atoi(addr.substr(i+1, addr.size()-i-1).c_str());
+
+    
+    memset(&addr_, 0, sizeof(addr_));
+    addr_.sin_family = AF_INET;
+    addr_.sin_addr.s_addr = inet_addr(ip_.c_str());
+    addr_.sin_port = htons(port_);
+}
+
+IPNetAddr::IPNetAddr(sockaddr_in addr):addr_(addr){
+    ip_ = inet_ntoa(addr_.sin_addr);
+    port_ = ntohs(addr.sin_port);
+}
+
+sockaddr* IPNetAddr::getSockAddr(){
+    return reinterpret_cast<sockaddr*>(&addr_);
+}
+
+socklen_t IPNetAddr::getSockLen(){
+    return sizeof(addr_);
+}
+
+int IPNetAddr::getFamily(){
+    return AF_INET;
+}
+
+std::string IPNetAddr::toString(){
+    return ip_ + ":" + std::to_string(port_);
+}
+
+bool IPNetAddr::checkValid(){
+    if(ip_.empty()) {
+        return false;
+    }
+    if(port_ <= 0 || port_ > 65535){
+        return false;
+    }
+    if(inet_addr(ip_.c_str()) == INADDR_NONE) {
+        return false;
+    }
+    return true;
+}
+```
+### tcp_acceptor.h
+```c++
+class TcpAcceptor {
+
+public:
+    TcpAcceptor(NetAddr::s_ptr local_addr);
+
+    ~TcpAcceptor();
+
+public:
+    int accept();
+
+private:
+    NetAddr::s_ptr local_addr_; // 服务端监听的地址 addr -> ip:port
+    int family_{-1};            // 地址协议族
+    int listenfd_{-1};           // listenfd
+    
+};
+```
+### tcp_acceptor.cc
+```c++
+TcpAcceptor::TcpAcceptor(NetAddr::s_ptr local_addr):local_addr_(local_addr){
+    if(!local_addr_->checkValid()){
+        ERRORLOG("invalid local addr %s", local_addr_->toString().c_str());
+        exit(0);
+    }
+    family_ = local_addr_->getFamily();
+    listenfd_ = socket(family_, SOCK_STREAM, 0);
+    if(listenfd_ == 0){
+        ERRORLOG("invalid listenfd %d", listenfd_);
+        exit(0);
+    }
+
+    int val = 1;
+    // SO_REUSEADDR 监听一个套接字，然后服务器关闭，重启这个服务，如果是同一个端口可能会报bind错误，addr已经被绑定。
+    // 因为tcp在主动关闭连接的一方，套接字会变成timewait状态，处于timewait状态会持续占用端口，如果新程序在这个端口启动，bind就会出错。
+    // 该选项可以重新绑定这个端口。
+    if(setsockopt(listenfd_, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) != 0){
+        ERRORLOG("setsockopt REUSEADDR error, errno=%d, error=%s", errno, strerror(errno));
+    }
+
+    socklen_t len = local_addr_->getSockLen();
+    int rt = bind(listenfd_, local_addr->getSockAddr(), len);
+    if(rt != 0){
+        ERRORLOG("bind error, errno=%d, error=%s", errno, strerror(errno));
+        exit(0);
+    }
+
+    rt = listen(listenfd_, 1000);
+    if(rt != 0){
+        ERRORLOG("listen error, errno=%d, error=%s", errno, strerror(errno));
+        exit(0);
+    }
+}
+
+TcpAcceptor::~TcpAcceptor(){
+
+}
+
+int TcpAcceptor::accept(){
+    if(family_ == AF_INET){
+        sockaddr_in client_addr;
+        bzero(&client_addr,sizeof(client_addr));
+        socklen_t client_addr_len = sizeof(client_addr);
+
+        int client_fd = ::accept(listenfd_, reinterpret_cast<sockaddr*>(&client_addr), &client_addr_len);
+        if(client_fd < 0){
+            ERRORLOG("accept error, errno=%d, error=%s", errno, strerror(errno));
+        }
+
+        IPNetAddr addr(client_addr);
+        INFOLOG("A client have accept succ, peer addr [%s]", addr.toString().c_str());
+        return client_fd;
+        
+    }
+    return -1;
+}
+```
+
 ## TcpServer  
 ![主从Reactor](img/image.png)
+
+主线程通过一个EventLoop循环的从Client接收连接请求并且注册给IO线程  
+只注册Acceptor，绑定的处理方法是将连接对应的处理函数构造成EPOLL事件在IO线程注册。
+
+IO线程则监听这些事件，等待EPOLL触发。
+
+### tcp_server.h
+```c++
+class TcpServer{
+
+public:
+    TcpServer(NetAddr::s_ptr local_addr);
+
+    ~TcpServer();
+
+public:
+    void start();
+
+private:
+    void init();
+    
+    // 有新客户端连接需要执行
+    void onAccept();
+
+private:
+    TcpAcceptor::s_ptr acceptor_;
+    NetAddr::s_ptr local_addr_;             // 本地监听的地址
+    FdEvent *listen_fd_event_{0};
+    
+    EventLoop* main_event_loop_{NULL};      // main reactor
+    IOThreadGroup* io_thread_group_{NULL};  // subReactor 组
+    
+    int client_counts_{0};
+};
+```
+### tcp_server.cc
+```c++
+TcpServer::TcpServer(NetAddr::s_ptr local_addr):local_addr_(local_addr){
+    INFOLOG("[TcpServer] Start create");
+    init();
+    INFOLOG("[TcpServer] Success create on [%s]", local_addr->toString().c_str());
+}
+
+TcpServer::~TcpServer(){
+    if(main_event_loop_){
+        delete main_event_loop_;
+        main_event_loop_ = NULL;
+    }
+    if(io_thread_group_){
+        delete io_thread_group_;
+        io_thread_group_ = NULL;
+    }
+}
+
+void TcpServer::start(){
+    DEBUGLOG("tcpServer start - io_thread_group");
+    io_thread_group_->start();
+    main_event_loop_->loop();
+}
+
+void TcpServer::init(){
+    acceptor_ = std::make_shared<TcpAcceptor>(local_addr_);
+
+    DEBUGLOG("---------- tcpServer mian_event_loop create ----------");
+    main_event_loop_ = EventLoop::GetCurEventLoop();
+
+    DEBUGLOG("---------- tcpServer io_thread_group create ----------");
+    io_thread_group_ = new IOThreadGroup(2);
+
+    listen_fd_event_ = new FdEvent(acceptor_->getListenFd(), "监听主循环事件");
+    listen_fd_event_->listen(FdEvent::IN_EVENT, std::bind(&TcpServer::onAccept, this));
+
+    main_event_loop_->addEpollEvent(listen_fd_event_);
+    DEBUGLOG("----------        tcpServer init over        ----------");
+}
+
+// 有一个新连接来了， maineventloop处理，添加到 iothreadgroup中
+void TcpServer::onAccept(){
+    int client_fd = acceptor_->accept();
+    ++client_counts_;
+
+    INFOLOG("[TcpServer] Success get client fd=%d", client_fd);
+}
+```
 ## TcpConnection  
 ## TcpClient  
 # RPC  
