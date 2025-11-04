@@ -19,10 +19,14 @@ public:
     FdEvent(int fd, std::string fd_name);
     
     ~FdEvent();
+public:
+    void setNonBlock();
 
     std::function<void()> handler(TriggerEvent ev_t);
 
     void listen(TriggerEvent ev_t, std::function<void()> callback);
+
+    void cancel(TriggerEvent ev_t);
 
     int getFd() const { return fd_; }
     std::string getFdName() const { return fd_name_; }

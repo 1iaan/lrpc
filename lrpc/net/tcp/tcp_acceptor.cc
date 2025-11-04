@@ -5,9 +5,11 @@
 #include <cassert>
 #include <cerrno>
 #include <cstring>
+#include <memory>
 #include <netinet/in.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <utility>
 
 namespace lrpc {
 
@@ -49,7 +51,7 @@ TcpAcceptor::~TcpAcceptor(){
 
 }
 
-int TcpAcceptor::accept(){
+std::pair<int, NetAddr::s_ptr> TcpAcceptor::accept(){
     if(family_ == AF_INET){
         sockaddr_in client_addr;
         bzero(&client_addr,sizeof(client_addr));
@@ -60,12 +62,12 @@ int TcpAcceptor::accept(){
             ERRORLOG("accept error, errno=%d, error=%s", errno, strerror(errno));
         }
 
-        IPNetAddr addr(client_addr);
-        INFOLOG("[TcpServer] A client have accept success, peer addr [%s]", addr.toString().c_str());
-        return client_fd;
+        IPNetAddr::s_ptr peer_addr = std::make_shared<IPNetAddr>(client_addr);
+        INFOLOG("[TcpServer] A client have accept success, peer addr [%s]", peer_addr->toString().c_str());
+        return {client_fd, peer_addr};
         
     }
-    return -1;
+    return {-1, nullptr};
 }
 
 

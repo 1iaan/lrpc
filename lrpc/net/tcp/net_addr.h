@@ -23,7 +23,7 @@ public:
     virtual bool checkValid() = 0;
 };
 
-class IPNetAddr: public NetAddr{
+class IPNetAddr final : public NetAddr{
 
 public:
     IPNetAddr(const std::string& ip, uint16_t port);

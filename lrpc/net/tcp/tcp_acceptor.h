@@ -15,7 +15,7 @@ public:
     ~TcpAcceptor();
 
 public:
-    int accept();
+    std::pair<int, NetAddr::s_ptr> accept();
 
     int getListenFd() { return listenfd_; }
 

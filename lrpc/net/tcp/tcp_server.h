@@ -4,6 +4,8 @@
 #include "lrpc/net/tcp/net_addr.h"
 #include "lrpc/net/eventloop.h"
 #include "lrpc/net/io_thread_group.h"
+#include "lrpc/net/tcp/tcp_connection.h"
+#include <unordered_set>
 
 namespace lrpc{
 
@@ -31,6 +33,7 @@ private:
     EventLoop* main_event_loop_{NULL};      // main reactor
     IOThreadGroup* io_thread_group_{NULL};  // subReactor 组
     
+    std::unordered_set<TcpConnection::s_ptr> client_;
     int client_counts_{0};
 };
 

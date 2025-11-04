@@ -3,7 +3,9 @@
 #include "lrpc/net/eventloop.h"
 #include "lrpc/net/fd_event.h"
 #include "lrpc/net/io_thread_group.h"
+#include "lrpc/net/tcp/net_addr.h"
 #include "lrpc/net/tcp/tcp_acceptor.h"
+#include "lrpc/net/tcp/tcp_connection.h"
 #include <memory>
 
 namespace lrpc{
@@ -26,7 +28,6 @@ TcpServer::~TcpServer(){
 }
 
 void TcpServer::start(){
-    DEBUGLOG("tcpServer start - io_thread_group");
     io_thread_group_->start();
     main_event_loop_->loop();
 }
@@ -49,14 +50,22 @@ void TcpServer::init(){
 
 // 有一个新连接来了， maineventloop处理，添加到 iothreadgroup中
 void TcpServer::onAccept(){
-    int client_fd = acceptor_->accept();
+    auto acc = acceptor_->accept();
+    int client_fd = acc.first;
+    NetAddr::s_ptr peer_addr = acc.second;
+
     ++client_counts_;
     
     // TODO 把 client_fd 添加到 io线程中
     // FdEvent *client_fd_event = new FdEvent(client_fd);
-
     // auto eventloop = io_thread_group_->getIOThread();
     // eventloop->getEventloop()->addEpollEvent(client_fd_event);
+    IOThread* io_thread = io_thread_group_->getIOThread();
+    
+    TcpConnection::s_ptr connection = std::make_shared<TcpConnection>(io_thread, client_fd, 128, peer_addr);
+    connection->setState(TcpConnection::Connected);
+    client_.insert(connection);
+    
 
     INFOLOG("[TcpServer] Success get client fd=%d", client_fd);
 }

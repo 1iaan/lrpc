@@ -7,13 +7,14 @@
 namespace lrpc {
 
 // [%y-%m-%d %H:%M:%s.%ms]\t[pid:tid]\t[file_name:line][%msg]
+inline std::string formatString(const char* fmt) {
+    return std::string(fmt);
+}
+
 template<typename... Args>
 std::string formatString(const char* str, Args&& ...args){
     int size = snprintf(nullptr, 0, str, args...); // 获取格式化长度
-    if(size <= 0) return {};
-    
-    std::string result;
-    result.resize(size);
+    std::string result(size, '\0');
     snprintf(&result[0], size + 1, str, args...);
     return result;
 }
@@ -21,27 +22,27 @@ std::string formatString(const char* str, Args&& ...args){
 #define DEBUGLOG(str, ...)\
     if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Debug) {\
         char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
-        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Debug))->toString() + _locBuf \
+        std::string _msg_ = (new lrpc::LogEvent(lrpc::LogLevel::Debug))->toString() + _locBuf \
         + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
-        lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
+        lrpc::Logger::GetGlobalLogger()->pushLog(_msg_);\
         lrpc::Logger::  GetGlobalLogger()->log();\
     }\
 
 #define INFOLOG(str, ...)\
     if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Info) {\
         char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
-        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Info))->toString() + _locBuf  \
+        std::string _msg_ = (new lrpc::LogEvent(lrpc::LogLevel::Info))->toString() + _locBuf  \
         + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
-        lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
+        lrpc::Logger::GetGlobalLogger()->pushLog(_msg_);\
         lrpc::Logger::  GetGlobalLogger()->log();\
     }\
 
 #define ERRORLOG(str, ...)\
     if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Error) {\
         char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
-        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Error))->toString() + _locBuf  \
+        std::string _msg_ = (new lrpc::LogEvent(lrpc::LogLevel::Error))->toString() + _locBuf  \
         + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
-        lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
+        lrpc::Logger::GetGlobalLogger()->pushLog(_msg_);\
         lrpc::Logger::  GetGlobalLogger()->log();\
     }\
 

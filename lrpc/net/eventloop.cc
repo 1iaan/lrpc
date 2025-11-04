@@ -24,7 +24,7 @@
     } else {  \
         listen_fds_.insert(event->getFd()); \
     } \
-    DEBUGLOG("eventloop [%d] add event success, fd [%d:%s], event [%d]", tid_,  event->getFd(), event->getFdName().c_str(), tmp); \
+    DEBUGLOG("eventloop [%d] add event success, fd [%d:%s], event [%u]", tid_,  event->getFd(), event->getFdName().c_str(), tmp.events); \
 
 #define DEL_TO_EPOLL() \
     auto it = listen_fds_.find(event->getFd()); \
@@ -33,13 +33,13 @@
     } \
     int op = EPOLL_CTL_DEL; \
     epoll_event tmp = event->getEpollEvent(); \
-    int rt = epoll_ctl(epoll_fd_, op, event->getFd(), &tmp); \
+    int rt = epoll_ctl(epoll_fd_, op, event->getFd(), nullptr); \
     if (rt == -1) { \
             ERRORLOG("faild epoll_ctl when add fd [%d:%s], errno=%d, errno=%s", event->getFd(), event->getFdName().c_str(), errno, strerror(errno)); \
     }else { \
         listen_fds_.erase(event->getFd()); \
     } \
-    DEBUGLOG("eventloop [%d] delete event success, fd [%d:%s], event [%d]", tid_ , event->getFd(), event->getFdName().c_str(), tmp); \
+    DEBUGLOG("eventloop [%d] delete event success, fd [%d:%s], event [%u]", tid_ , event->getFd(), event->getFdName().c_str(), tmp.events); \
 
 namespace lrpc{
 

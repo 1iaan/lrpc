@@ -1,11 +1,14 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <vector>
 namespace lrpc{
 
 class TcpBuffer{
 public:
+    typedef std::shared_ptr<TcpBuffer> s_ptr;
+
     TcpBuffer(size_t size);
 
     ~TcpBuffer();
@@ -28,13 +31,16 @@ public:
     void moveReadIndex(size_t len);
 
     void moveWriteIndex(size_t len);
+
+public:
+    std::vector<char> buffer_;
+
 private:
     size_t read_idx_{0};
     size_t write_idx_{0};
     size_t size_{0};
     bool full_{false};
 
-    std::vector<char> buffer_;
 };
 
 } // namespace lrpc

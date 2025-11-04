@@ -4,6 +4,7 @@
 #include <string>
 #include <sys/epoll.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 namespace lrpc{
 
@@ -25,6 +26,14 @@ FdEvent::FdEvent(int fd, std::string fd_name): fd_(fd), fd_name_(fd_name){
 
 FdEvent::~FdEvent(){
 
+}
+
+void FdEvent::setNonBlock(){
+    int flag = fcntl(fd_, F_GETFL, 0);
+    if(flag & O_NONBLOCK){
+        return ;
+    }
+    fcntl(fd_, F_SETFL, flag|O_NONBLOCK);
 }
 
 std::function<void()> FdEvent::handler(TriggerEvent ev_t){
@@ -54,6 +63,14 @@ void FdEvent::listen(TriggerEvent ev_t, std::function<void()> callback){
         }
         default:
         break;
+    }
+}
+
+void FdEvent::cancel(TriggerEvent ev_t){
+    if(ev_t == IN_EVENT){
+        listen_events_.events &= (~EPOLLIN);
+    }else if(ev_t == OUT_EVENT){
+        listen_events_.events &= (~EPOLLOUT);
     }
 }
 
