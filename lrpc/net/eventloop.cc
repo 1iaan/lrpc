@@ -24,7 +24,7 @@
     } else {  \
         listen_fds_.insert(event->getFd()); \
     } \
-    DEBUGLOG("eventloop [%d] add event success, fd [%d:%s], event [%u]", tid_,  event->getFd(), event->getFdName().c_str(), tmp.events); \
+    DEBUGLOG("eventloop [%d] add event success, fd [%d:%s], event [%u]", tid_,  event->getFd(), event->getFdName().c_str(), tmp); \
 
 #define DEL_TO_EPOLL() \
     auto it = listen_fds_.find(event->getFd()); \
@@ -39,7 +39,7 @@
     }else { \
         listen_fds_.erase(event->getFd()); \
     } \
-    DEBUGLOG("eventloop [%d] delete event success, fd [%d:%s], event [%u]", tid_ , event->getFd(), event->getFdName().c_str(), tmp.events); \
+    DEBUGLOG("eventloop [%d] delete event success, fd [%d:%s], event [%u]", tid_ , event->getFd(), event->getFdName().c_str(), tmp); \
 
 namespace lrpc{
 
@@ -104,6 +104,7 @@ void EventLoop::initTimer(){
 }
 
 void EventLoop::loop(){
+    is_loop_ = true;
     while(!stop_){
         /* 执行 tasks_  */
         ScopeMutex<Mutex> lock(mutex_);

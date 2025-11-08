@@ -23,6 +23,8 @@ public:
 
     void stop();
 
+    bool isLooping() { return is_loop_; }
+
     // 如果是主线程执行就直接执行，不是主线程就丢进tasks_里等待主线程执行。
     void addEpollEvent(FdEvent* event);
 
@@ -51,6 +53,7 @@ private:
     Timer *timer_{NULL};
 
     bool stop_{false};
+    bool is_loop_{false};
 
     // 正在监听的事件
     std::set<int> listen_fds_;

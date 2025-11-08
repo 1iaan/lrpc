@@ -1801,6 +1801,47 @@ void TcpServer::onAccept(){
 ```
 ## TcpConnection  
 ![](img/TcpConnection.png)
+对客户端和服务端有不同的逻辑
+
+对客户端，对端为服务端。  
+- 初始化时
+    1. 必须等待connect回包(fd 可写)连接才算成功，不需要设置listenRead(onRead)
+- onRead 时
+    1. 从 socket 缓冲区调用 read 读取字节流到 inbuffer 里
+    2. 从 inbuffer 中 decode 得到 message
+    3. message 的 req_id 符合，则执行其注册时候的回调
+- onWrite时
+    1. 把 client push 的 messages encode到 outbuffer
+    2. 从 outbuffer 调用 write 写字节流到 socket 缓冲区
+    3. 如果全部发送完成，取消listenRead
+    4. 执行回调
+- tcp_client调用writeMessage时
+    1. connection.pushSendMessage
+    2. connection.listenWrite
+- tcp_server调用readReadMessage时
+    1. connection.pushMessage
+    2. connection.listenRead
+
+
+对服务端，对端为客户端
+- 初始化时
+    1. accpet成功则连接建立，需要立刻listenRead(onRead)
+- onRead时
+    1. 从 socket 缓冲区调用 read 读取字节流到 inbuffer 里
+    2. execute 协议解析
+    3. 结果写入outbuffer 并且 listenWrite
+- onWrite时
+    1. 从 outbuffer 调用 write 写字节流到 socket 缓冲区
+    2. 如果全部发送完成，取消listenRead
+
+全过程
+1. client：调用writeMessage，listenWrite 并记录消息(req_id+msg)、回调
+2. client：发现可写，触发onWrite， encode message 到 outbuffer 然后发送到 socke，发送完毕取消listenWrite, 执行回调
+3. server：发现可读，触发OnRead，从socket读取到inbuffer，协议解析执行，写回 outbuffer，listenWrite
+4. server：发现可写，触发OnWrite, 将 outbuffer 发送到socket
+5. client：调用readMessage，listenRead 并且记录req_id、回调
+6. client：发现可读，除法OnRead，从socket读取到inbuffer，decode 得到 message，执行回调（操作message）
+    
 
 ### tcp_connection.h
 ```c++
@@ -1813,10 +1854,16 @@ public:
         Closed = 4,
     };
 
+    enum TcpConnectionType{
+        ClientConnectionByServer = 1,   // 服务端使用，代表对端为客户端连接
+        ServerConnectionByClient = 2,   // 客户端使用，代表对端为服务端连接
+    };
+
 public:
     typedef std::shared_ptr<TcpConnection> s_ptr;
 
-    TcpConnection(IOThread* io_thread, int fd, int buffer_size, NetAddr::s_ptr peer_addr_);
+    // TcpConnection(IOThread* io_thread, int fd, int buffer_size, NetAddr::s_ptr peer_addr);
+    TcpConnection(EventLoop* event_loop, int fd, int buffer_size, NetAddr::s_ptr peer_addr, TcpConnectionType type);
 
     ~TcpConnection();
 
@@ -1836,6 +1883,17 @@ public:
 
     void shutdown();
 
+    void setConnectionType(const TcpConnectionType type) { connection_type_ = type; }
+
+    void listenRead();
+
+    void listenWrite();
+
+    void pushMessage(
+        AbstractProtocol::s_ptr message, 
+        std::function<void(AbstractProtocol::s_ptr)> callback
+    );
+
 private:
     // 通信的两个对端
     NetAddr::s_ptr local_addr_;
@@ -1846,28 +1904,46 @@ private:
     TcpBuffer::s_ptr out_buffer;
 
     // 持有该连接的IO线程IO， 也就是本对象属于哪个IO线程
-    IOThread* io_thread_{NULL};
+    // IOThread* io_thread_{NULL};
+    EventLoop* event_loop_{NULL};
     
     // 一个连接只用一个 FdEvent监听
     FdEvent* fd_event_{NULL};
     int fd_{-1};
 
     TcpState state_;
+
+    TcpConnectionType connection_type_{TcpConnectionType::ServerConnectionByClient};
+
+    // key = message->getReqId() value = callback
+    std::vector<
+        std::pair<AbstractProtocol::s_ptr, std::function<void(AbstractProtocol::s_ptr)>>
+    > write_callbacks_;
+
+    AbstractCoder* coder_{NULL};
 };
 ```
 
 ### tcp_connection.cc
 ```c++
-TcpConnection::TcpConnection(IOThread* io_thread, int fd, int buffer_size, NetAddr::s_ptr peer_addr)
-    : peer_addr_(peer_addr), io_thread_(io_thread), fd_(fd), state_(NotConnected){
+TcpConnection::TcpConnection(EventLoop* event_loop, int fd, int buffer_size, NetAddr::s_ptr peer_addr, TcpConnectionType type)
+    : peer_addr_(peer_addr), event_loop_(event_loop), fd_(fd), state_(NotConnected), connection_type_(type) {
     in_buffer = std::make_shared<TcpBuffer>(buffer_size);
     out_buffer = std::make_shared<TcpBuffer>(buffer_size);
 
     fd_event_ = FdEventGroup::GetFdEventGroup()->getFdEvent(fd);
     fd_event_->setNonBlock();
-    fd_event_->listen(FdEvent::IN_EVENT, std::bind(&TcpConnection::onRead, this));
 
-    io_thread->getEventloop()->addEpollEvent(fd_event_);
+    // 服务端，对端为客户端，需要在初始化监听可读事件
+    // server中onAccept会创建Connection，连接完成
+    if(connection_type_ == ClientConnectionByServer){
+        listenRead();
+    }
+    // 客户端，对端为服务端，不需要一直监听可读事件
+    // 他发送connect后必须等待回包才说明连接成功
+    // 可读的OnRead可以执行的前提是连接已经建立
+
+    coder_ = new StringCoder();
 }
 
 TcpConnection::~TcpConnection(){
@@ -1957,6 +2033,20 @@ void TcpConnection::onWrite(){
         return ;
     }
 
+    // 对端是服务端
+    if (connection_type_ == ServerConnectionByClient){
+        // 将数据写入到 buffer 
+        // 1. 将 message encoder
+        // 2. 将 字节流写入到 buffer，全部发送
+
+        std::vector<AbstractProtocol*> messages;
+        for(size_t i = 0;i < write_callbacks_.size(); ++ i){
+            messages.push_back(write_callbacks_[i].first.get());
+        }
+        coder_->encode(messages, out_buffer);
+    }
+
+    // 从 outbuffer 调用 write 写字节流到 socket 缓冲区
     bool is_write_all = false;
     while(true){
         if(out_buffer->readable() == 0){
@@ -1982,17 +2072,27 @@ void TcpConnection::onWrite(){
     }
     if(is_write_all){
         fd_event_->cancel(FdEvent::OUT_EVENT);
-        io_thread_->getEventloop()->addEpollEvent(fd_event_);
+        event_loop_->addEpollEvent(fd_event_);
     }
-}
 
+    // 如果是对端是服务端，执行回调函数
+    if(connection_type_ == ServerConnectionByClient){
+        for(size_t i = 0;i < write_callbacks_.size(); ++ i){
+            write_callbacks_[i].second(write_callbacks_[i].first);
+        }
+    }
+    write_callbacks_.clear(); 
+}
 void TcpConnection::clear(){
     // 处理关闭连接后的清理动作
     if(state_ == Closed){
         return;
     }
 
-    io_thread_->getEventloop()->delEpollEvent(fd_event_);
+
+    event_loop_->delEpollEvent(fd_event_);
+    fd_event_->cancel(FdEvent::IN_EVENT);
+    fd_event_->cancel(FdEvent::OUT_EVENT);
 
     state_ = Closed;
 
@@ -2012,9 +2112,31 @@ void TcpConnection::shutdown(){
     // 服务器就会进入timewait
     ::shutdown(fd_, SHUT_RDWR);
 }
+
+void TcpConnection::listenRead(){
+    fd_event_->listen(FdEvent::IN_EVENT, std::bind(&TcpConnection::onRead, this));
+    event_loop_->addEpollEvent(fd_event_);
+}
+
+void TcpConnection::listenWrite(){
+    fd_event_->listen(FdEvent::OUT_EVENT, std::bind(&TcpConnection::onWrite, this));
+    event_loop_->addEpollEvent(fd_event_);
+}
+
+void TcpConnection::pushMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback){
+    write_callbacks_.push_back(std::make_pair(message, callback));
+}
 ```
 
 ## TcpClient  
+- Connect: 连接对端
+- Write: 将RPC响应发送给客户端
+- Read: 读取客户端发来的数据组装成RPC请求
+非阻塞Connect:
+- 0 成功
+- -1 errno=EINPROGRESS 表示连接正在建立，此时可以添加到epoll去监听其可写事件。等待可写就绪，调用getsockopt获取fd上的错误，0代表连接成功。
+- 其他errno
+
 # RPC  
 ## 协议封装  
 基于Protobuf的RPC协议编码  

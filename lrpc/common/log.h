@@ -22,7 +22,7 @@ std::string formatString(const char* str, Args&& ...args){
 #define DEBUGLOG(str, ...)\
     if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Debug) {\
         char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
-        std::string _msg_ = (new lrpc::LogEvent(lrpc::LogLevel::Debug))->toString() + _locBuf \
+        std::string _msg_ = (lrpc::LogEvent(lrpc::LogLevel::Debug)).toString() + _locBuf \
         + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
         lrpc::Logger::GetGlobalLogger()->pushLog(_msg_);\
         lrpc::Logger::  GetGlobalLogger()->log();\
@@ -31,7 +31,7 @@ std::string formatString(const char* str, Args&& ...args){
 #define INFOLOG(str, ...)\
     if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Info) {\
         char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
-        std::string _msg_ = (new lrpc::LogEvent(lrpc::LogLevel::Info))->toString() + _locBuf  \
+        std::string _msg_ = (lrpc::LogEvent(lrpc::LogLevel::Info)).toString() + _locBuf  \
         + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
         lrpc::Logger::GetGlobalLogger()->pushLog(_msg_);\
         lrpc::Logger::  GetGlobalLogger()->log();\
@@ -40,7 +40,7 @@ std::string formatString(const char* str, Args&& ...args){
 #define ERRORLOG(str, ...)\
     if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Error) {\
         char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
-        std::string _msg_ = (new lrpc::LogEvent(lrpc::LogLevel::Error))->toString() + _locBuf  \
+        std::string _msg_ = (lrpc::LogEvent(lrpc::LogLevel::Error)).toString() + _locBuf  \
         + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
         lrpc::Logger::GetGlobalLogger()->pushLog(_msg_);\
         lrpc::Logger::  GetGlobalLogger()->log();\

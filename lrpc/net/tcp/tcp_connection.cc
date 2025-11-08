@@ -2,25 +2,37 @@
 #include "lrpc/net/fd_event.h"
 #include "lrpc/net/fd_event_group.h"
 #include "lrpc/net/tcp/tcp_connection.h"
+#include "lrpc/net/string_coder.h"
+#include "lrpc/net/abs_protocol.h"
 #include "lrpc/net/tcp/tcp_buffer.h"
 #include <cerrno>
+#include <cstddef>
 #include <memory>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace lrpc{
 
-TcpConnection::TcpConnection(IOThread* io_thread, int fd, int buffer_size, NetAddr::s_ptr peer_addr)
-    : peer_addr_(peer_addr), io_thread_(io_thread), fd_(fd), state_(NotConnected){
+TcpConnection::TcpConnection(EventLoop* event_loop, int fd, int buffer_size, NetAddr::s_ptr peer_addr, TcpConnectionType type)
+    : peer_addr_(peer_addr), event_loop_(event_loop), fd_(fd), state_(NotConnected), connection_type_(type) {
     in_buffer = std::make_shared<TcpBuffer>(buffer_size);
     out_buffer = std::make_shared<TcpBuffer>(buffer_size);
 
     fd_event_ = FdEventGroup::GetFdEventGroup()->getFdEvent(fd);
     fd_event_->setNonBlock();
-    fd_event_->listen(FdEvent::IN_EVENT, std::bind(&TcpConnection::onRead, this));
 
-    io_thread->getEventloop()->addEpollEvent(fd_event_);
+    // 服务端，对端为客户端，需要在初始化监听可读事件
+    // server中onAccept会创建Connection，连接完成
+    if(connection_type_ == ClientConnectionByServer){
+        listenRead();
+    }
+    // 客户端，对端为服务端，不需要一直监听可读事件
+    // 他发送connect后必须等待回包才说明连接成功
+    // 可读的OnRead可以执行的前提是连接已经建立
+
+    coder_ = new StringCoder();
 }
 
 TcpConnection::~TcpConnection(){
@@ -79,29 +91,49 @@ void TcpConnection::onRead(){
         ERRORLOG("not read all data");
     }
 
-    // TODO: 解析协议
+    // TODO: RPC解析协议
+    
+    // 2. 协议解析
     execute();
 }
 
 void TcpConnection::execute(){
-    // 将RPC请求执行业务逻辑，获取RPC响应，发送回去
-    std::vector<char> tmp;
-    int size = in_buffer->readable();
-    tmp.resize(size);
+    // 服务端逻辑，对端是客户端
+    if(connection_type_ == ClientConnectionByServer){
+        DEBUGLOG("server execute");
+        // 将RPC请求执行业务逻辑，获取RPC响应，发送回去
+        std::vector<char> tmp;
+        int size = in_buffer->readable();
+        tmp.resize(size);
 
-    in_buffer->readFromBuf(tmp, size);
+        in_buffer->readFromBuf(tmp, size);
 
-    std::string msg;
-    for(int i = 0;i < tmp.size(); ++ i){
-        msg += tmp[i];
+        std::string msg;
+        for(int i = 0;i < tmp.size(); ++ i){
+            msg += tmp[i];
+        }
+        INFOLOG("success get request[%s] fomr client[%s]", tmp.data(), peer_addr_->toString().c_str());
+
+        // echo
+        out_buffer->writeToBuf(tmp.data(), tmp.size());
+
+        listenWrite();
     }
-    INFOLOG("success get request[%s] fomr client[%s]", tmp.data(), peer_addr_->toString().c_str());
+    // 客户端逻辑，对端是服务端
+    else {
+        DEBUGLOG("client execute");
+        // 从 buffer 里decode 得到 message 对象，执行其回调
+        std::vector<AbstractProtocol::s_ptr> out_messages;
+        coder_->decode(out_messages, in_buffer);
 
-    out_buffer->writeToBuf(tmp.data(), tmp.size());
-
-    fd_event_->listen(FdEvent::OUT_EVENT, std::bind(&TcpConnection::onWrite, this));
-    
-    io_thread_->getEventloop()->addEpollEvent(fd_event_);
+        for(size_t i = 0; i < out_messages.size(); ++ i){
+            std::string req_id = out_messages[i]->getReqId();
+            auto it = read_callbacks_.find(req_id);
+            if( it != read_callbacks_.end()){
+                it->second(out_messages[i]->shared_from_this());
+            }
+        }
+    }
 }
 
 void TcpConnection::onWrite(){
@@ -110,6 +142,21 @@ void TcpConnection::onWrite(){
         return ;
     }
 
+    // 对端是服务端
+    // 1. 编码message到outbuffer
+    if (connection_type_ == ServerConnectionByClient){
+        // 将数据写入到 buffer 
+        // 1. 将 message encoder
+        // 2. 将 字节流写入到 buffer，全部发送
+
+        std::vector<AbstractProtocol::s_ptr> messages;
+        for(size_t i = 0;i < write_callbacks_.size(); ++ i){
+            messages.push_back(write_callbacks_[i].first);
+        }
+        coder_->encode(messages, out_buffer);
+    }
+
+    // 2. 从 outbuffer 调用 write 写字节流到 socket 缓冲区
     bool is_write_all = false;
     while(true){
         if(out_buffer->readable() == 0){
@@ -133,10 +180,19 @@ void TcpConnection::onWrite(){
             break;
         }
     }
+    // 3. 如果全部发送完成，取消可写事件监听
     if(is_write_all){
         fd_event_->cancel(FdEvent::OUT_EVENT);
-        io_thread_->getEventloop()->addEpollEvent(fd_event_);
+        event_loop_->addEpollEvent(fd_event_);
     }
+
+    // 4.如果是对端是服务端，执行回调函数
+    if(connection_type_ == ServerConnectionByClient){
+        for(size_t i = 0;i < write_callbacks_.size(); ++ i){
+            write_callbacks_[i].second(write_callbacks_[i].first);
+        }
+    }
+    write_callbacks_.clear(); 
 }
 
 void TcpConnection::clear(){
@@ -145,7 +201,10 @@ void TcpConnection::clear(){
         return;
     }
 
-    io_thread_->getEventloop()->delEpollEvent(fd_event_);
+
+    event_loop_->delEpollEvent(fd_event_);
+    fd_event_->cancel(FdEvent::IN_EVENT);
+    fd_event_->cancel(FdEvent::OUT_EVENT);
 
     state_ = Closed;
 
@@ -164,6 +223,24 @@ void TcpConnection::shutdown(){
     // 当FD发生可读事件但是可读数据为0，即对端也发送了FIN报文
     // 服务器就会进入timewait
     ::shutdown(fd_, SHUT_RDWR);
+}
+
+void TcpConnection::listenRead(){
+    fd_event_->listen(FdEvent::IN_EVENT, std::bind(&TcpConnection::onRead, this));
+    event_loop_->addEpollEvent(fd_event_);
+}
+
+void TcpConnection::listenWrite(){
+    fd_event_->listen(FdEvent::OUT_EVENT, std::bind(&TcpConnection::onWrite, this));
+    event_loop_->addEpollEvent(fd_event_);
+}
+
+void TcpConnection::pushSendMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback){
+    write_callbacks_.push_back(std::make_pair(message, callback));
+}
+
+void TcpConnection::pushReadMessage(std::string req_id, std::function<void(AbstractProtocol::s_ptr)> callback){
+    read_callbacks_.insert(std::make_pair(req_id, callback));
 }
 
 }   // namespace lrpc
