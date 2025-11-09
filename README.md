@@ -1889,10 +1889,9 @@ public:
 
     void listenWrite();
 
-    void pushMessage(
-        AbstractProtocol::s_ptr message, 
-        std::function<void(AbstractProtocol::s_ptr)> callback
-    );
+    void pushSendMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback);
+
+    void pushReadMessage(std::string req_id, std::function<void(AbstractProtocol::s_ptr)> callback);
 
 private:
     // 通信的两个对端
@@ -1919,6 +1918,10 @@ private:
     std::vector<
         std::pair<AbstractProtocol::s_ptr, std::function<void(AbstractProtocol::s_ptr)>>
     > write_callbacks_;
+
+    std::map<
+        std::string, std::function<void(AbstractProtocol::s_ptr)>
+    > read_callbacks_;
 
     AbstractCoder* coder_{NULL};
 };
@@ -2002,29 +2005,49 @@ void TcpConnection::onRead(){
         ERRORLOG("not read all data");
     }
 
-    // TODO: 解析协议
+    // TODO: RPC解析协议
+    
+    // 2. 协议解析
     execute();
 }
 
 void TcpConnection::execute(){
-    // 将RPC请求执行业务逻辑，获取RPC响应，发送回去
-    std::vector<char> tmp;
-    int size = in_buffer->readable();
-    tmp.resize(size);
+    // 服务端逻辑，对端是客户端
+    if(connection_type_ == ClientConnectionByServer){
+        DEBUGLOG("server execute");
+        // 将RPC请求执行业务逻辑，获取RPC响应，发送回去
+        std::vector<char> tmp;
+        int size = in_buffer->readable();
+        tmp.resize(size);
 
-    in_buffer->readFromBuf(tmp, size);
+        in_buffer->readFromBuf(tmp, size);
 
-    std::string msg;
-    for(int i = 0;i < tmp.size(); ++ i){
-        msg += tmp[i];
+        std::string msg;
+        for(int i = 0;i < tmp.size(); ++ i){
+            msg += tmp[i];
+        }
+        INFOLOG("success get request[%s] fomr client[%s]", tmp.data(), peer_addr_->toString().c_str());
+
+        // echo
+        out_buffer->writeToBuf(tmp.data(), tmp.size());
+
+        listenWrite();
     }
-    INFOLOG("success get request[%s] fomr client[%s]", tmp.data(), peer_addr_->toString().c_str());
+    // 客户端逻辑，对端是服务端
+    else {
+        DEBUGLOG("client execute");
+        // 从 buffer 里decode 得到 message 对象，执行其回调
+        std::vector<AbstractProtocol::s_ptr> out_messages;
+        coder_->decode(out_messages, in_buffer);
 
-    out_buffer->writeToBuf(tmp.data(), tmp.size());
-
-    fd_event_->listen(FdEvent::OUT_EVENT, std::bind(&TcpConnection::onWrite, this));
-    
-    io_thread_->getEventloop()->addEpollEvent(fd_event_);
+        for(size_t i = 0; i < out_messages.size(); ++ i){
+            std::string req_id = out_messages[i]->getReqId();
+            auto it = read_callbacks_.find(req_id);
+            if( it != read_callbacks_.end()){
+                it->second(out_messages[i]->shared_from_this());
+            }
+        }
+    }
 }
 
 void TcpConnection::onWrite(){
@@ -2034,19 +2057,20 @@ void TcpConnection::onWrite(){
     }
 
     // 对端是服务端
+    // 1. 编码message到outbuffer
     if (connection_type_ == ServerConnectionByClient){
         // 将数据写入到 buffer 
         // 1. 将 message encoder
         // 2. 将 字节流写入到 buffer，全部发送
 
-        std::vector<AbstractProtocol*> messages;
+        std::vector<AbstractProtocol::s_ptr> messages;
         for(size_t i = 0;i < write_callbacks_.size(); ++ i){
-            messages.push_back(write_callbacks_[i].first.get());
+            messages.push_back(write_callbacks_[i].first);
         }
         coder_->encode(messages, out_buffer);
     }
 
-    // 从 outbuffer 调用 write 写字节流到 socket 缓冲区
+    // 2. 从 outbuffer 调用 write 写字节流到 socket 缓冲区
     bool is_write_all = false;
     while(true){
         if(out_buffer->readable() == 0){
@@ -2070,12 +2094,13 @@ void TcpConnection::onWrite(){
             break;
         }
     }
+    // 3. 如果全部发送完成，取消可写事件监听
     if(is_write_all){
         fd_event_->cancel(FdEvent::OUT_EVENT);
         event_loop_->addEpollEvent(fd_event_);
     }
 
-    // 如果是对端是服务端，执行回调函数
+    // 4.如果是对端是服务端，执行回调函数
     if(connection_type_ == ServerConnectionByClient){
         for(size_t i = 0;i < write_callbacks_.size(); ++ i){
             write_callbacks_[i].second(write_callbacks_[i].first);
@@ -2083,6 +2108,7 @@ void TcpConnection::onWrite(){
     }
     write_callbacks_.clear(); 
 }
+
 void TcpConnection::clear(){
     // 处理关闭连接后的清理动作
     if(state_ == Closed){
@@ -2123,19 +2149,138 @@ void TcpConnection::listenWrite(){
     event_loop_->addEpollEvent(fd_event_);
 }
 
-void TcpConnection::pushMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback){
+void TcpConnection::pushSendMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback){
     write_callbacks_.push_back(std::make_pair(message, callback));
+}
+
+void TcpConnection::pushReadMessage(std::string req_id, std::function<void(AbstractProtocol::s_ptr)> callback){
+    read_callbacks_.insert(std::make_pair(req_id, callback));
 }
 ```
 
 ## TcpClient  
 - Connect: 连接对端
-- Write: 将RPC响应发送给客户端
-- Read: 读取客户端发来的数据组装成RPC请求
+- Write:    将RPC请求encode然后发送给服务端
+- Read:     读取服务端发来的数据decode成RPC请求
 非阻塞Connect:
 - 0 成功
 - -1 errno=EINPROGRESS 表示连接正在建立，此时可以添加到epoll去监听其可写事件。等待可写就绪，调用getsockopt获取fd上的错误，0代表连接成功。
 - 其他errno
+
+### tcp_client.cc
+```c++
+TcpClient::TcpClient(NetAddr::s_ptr peer_addr):peer_addr_(peer_addr){
+    event_loop_ = EventLoop::GetCurEventLoop();
+    fd_ = socket(peer_addr->getFamily(), SOCK_STREAM, 0);
+
+    if(fd_ < 0){
+        ERRORLOG("create socket error");
+        return ;
+    }
+
+    fd_event_ = FdEventGroup::GetFdEventGroup()->getFdEvent(fd_);
+    fd_event_->setNonBlock();
+
+    connection_ = std::make_shared<TcpConnection>(event_loop_, fd_, 128, peer_addr_, TcpConnection::ServerConnectionByClient);
+
+}
+
+TcpClient::~TcpClient(){
+    if(fd_ > 0){
+        close(fd_);
+    }
+}
+
+void TcpClient::connect(std::function<void()> callback){
+    int rt = ::connect(fd_, peer_addr_->getSockAddr(), peer_addr_->getSockLen());
+    if(rt == 0){
+        DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
+    }else if(rt == -1){
+        if(errno == EINPROGRESS){
+            // epoll 监听可写
+            DEBUGLOG("connect in progress");
+
+            fd_event_->listen(FdEvent::OUT_EVENT, [this, callback]()->void{
+                {}
+                int err = 0;
+                socklen_t len = sizeof(err);
+                getsockopt(fd_, SOL_SOCKET, SO_ERROR, &err, &len);
+                bool is_connected = false;
+                if(err == 0){
+                    DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
+                    connection_->setState(TcpConnection::Connected);
+                    is_connected = true; 
+                } else {
+                    ERRORLOG("connect error, errno=%d, error=%s", err, strerror(errno));
+                }
+                // 连接完成去掉可写事件监听，否则会一直除法
+                DEBUGLOG("去掉可写事件监听");
+                fd_event_->cancel(FdEvent::OUT_EVENT);
+                event_loop_->addEpollEvent(fd_event_);
+
+                // 连接成功才执行回调
+                if(is_connected && callback) callback();
+            });
+            
+            event_loop_->addEpollEvent(fd_event_);
+            if(!event_loop_->isLooping()) {
+                event_loop_->loop();
+            }
+
+        } else {
+            ERRORLOG("connect error, errno=%d, error=%s", errno, strerror(errno));
+            return ;
+        }
+    }
+}
+
+void TcpClient::writeMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback){
+    //1. 把message编码写入到connection的buffer中, done 也要写入。
+    //2. 启动connection可写事件。
+    connection_->pushSendMessage(message, callback);
+    connection_->listenWrite();
+}
+
+void TcpClient::readMessage(const std::string &req_id, std::function<void(AbstractProtocol::s_ptr)> callback){
+    //1. 启动connection可读事件
+    //2. 从buffer中解码读出message, 判断 req_id 是否相等，相等则读成功，执行其回调。
+    connection_->pushReadMessage(req_id, callback);
+    connection_->listenRead();
+}
+```
+
+### tcp_client.h
+```c++
+class TcpClient {
+
+public: 
+    TcpClient(NetAddr::s_ptr peer_addr);
+
+    ~TcpClient();
+
+public:
+    // 异步connect
+    // 如果调用connect成功，callback会执行
+    void connect(std::function<void()> callback);
+
+    // 异步发送 message
+    // 发送成功会调用callback，callback入参是message对象
+    void writeMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback);
+
+    // 异步接收 message
+    // 接收成功会调用callback， callback入参是message对象
+    void readMessage(const std::string &req_id, std::function<void(AbstractProtocol::s_ptr)> callback);
+
+
+private:
+    NetAddr::s_ptr peer_addr_;
+    EventLoop* event_loop_{NULL};
+
+    int fd_{-1};
+    FdEvent* fd_event_{NULL};
+    TcpConnection::s_ptr connection_{NULL};
+};
+```
 
 # RPC  
 ## 协议封装  
@@ -2252,5 +2397,117 @@ int main(){
     return 0;
 }
 ```
+## tcp_server
+```c++
+#include "lrpc/common/log.h"
+#include "lrpc/common/config.h"
+#include "lrpc/net/tcp/net_addr.h"
+#include "lrpc/net/tcp/tcp_server.h"
+#include <memory>
+#include <sys/socket.h>
+
+void test_tcpServer(){
+    lrpc::IPNetAddr::s_ptr addr = std::make_shared<lrpc::IPNetAddr>("127.0.0.1", 12345);
+    
+    lrpc::TcpServer tcp_server(addr);
+    tcp_server.start();
+}
+
+int main(){
+    lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
+    lrpc::Logger::SetGlobalLogger();
+
+    test_tcpServer();
+    return 0;
+}
+```
+
+## tcp_client
+```c++
+#include "lrpc/common/log.h"
+#include "lrpc/common/config.h"
+#include "lrpc/net/tcp/net_addr.h"
+#include "lrpc/net/tcp/tcp_connection.h"
+#include "lrpc/net/string_coder.h"
+#include "lrpc/net/tcp/tcp_client.h"
+#include <arpa/inet.h>
+#include <memory>
+#include <netinet/in.h>
+#include <strings.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+void test_connect(){
+    // 调用connect连接server
+    // write 一个字符串
+    // 等待 read 返回结果
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    if(fd < 0){
+        ERRORLOG("invalid fd %d", fd);
+        exit(0);
+    }
+
+    sockaddr_in server_addr;
+    bzero(&server_addr, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(12345);
+    inet_aton("127.0.0.1", &server_addr.sin_addr); 
+
+    int rt = connect(fd, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr));
+
+    std::string msg = "hello";
+
+    rt = write(fd, msg.c_str(), msg.length());
+
+    DEBUGLOG("success write %d bytes, [%s]",rt, msg.c_str());
+
+
+    char buf[100];
+    rt = read(fd, buf, 100);
+    DEBUGLOG("success read %d bytes, [%s]", rt , std::string(buf).c_str());
+}
+
+void test_client(){
+    lrpc::IPNetAddr::s_ptr addr = std::make_shared<lrpc::IPNetAddr>("127.0.0.1", 12345);
+    lrpc::TcpClient client(addr);
+    
+
+    
+    client.connect([addr, &client]()->void{
+        {}
+        DEBUGLOG("{tcp_client connect 回调} connect to [%s] success", addr->toString().c_str());
+        
+        std::shared_ptr<lrpc::StringProtocol> message = std::make_shared<lrpc::StringProtocol>("12345", "hello lrpc");
+        
+        client.writeMessage(message, [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
+            DEBUGLOG("client write message success, req_id=[%s]", msg_ptr->getReqId().c_str());
+        });
+
+        client.readMessage("12345", [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
+            std::shared_ptr<lrpc::StringProtocol> message = std::dynamic_pointer_cast<lrpc::StringProtocol>(msg_ptr);
+            DEBUGLOG("client read message success, req_id=[%s], msg=[%s]", 
+                message->getReqId().c_str(), message->getMsg().c_str()
+            );
+        });
+
+        client.writeMessage(message, [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
+            DEBUGLOG("client write message success, req_id=[%s]", msg_ptr->getReqId().c_str());
+        });
+    });
+}
+
+int main(){
+    lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
+    lrpc::Logger::SetGlobalLogger();
+
+    // test_connect();
+    test_client();
+
+    return 0;
+}
+```
+
 # 结语
 实现了一个轻量级C++ RPC框架，基于 Reactor 架构，单机可达100KQPS。项目参考了muduo 网络框架，包含代码生成工具、异步日志。通过本项目我熟悉了RPC通信原理，Reactor 架构，Linux 下后台开发知识。

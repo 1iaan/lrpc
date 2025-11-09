@@ -13,8 +13,6 @@
 
 namespace lrpc{
 
-
-
 class TcpConnection{
 public:
     enum TcpState{
