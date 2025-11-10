@@ -8,16 +8,18 @@ set(PATH_COMM   ${CMAKE_CURRENT_SOURCE_DIR}/common)
 set(PATH_NET    ${CMAKE_CURRENT_SOURCE_DIR}/net)
 set(PATH_TCP    ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp)
 set(PATH_CODER  ${CMAKE_CURRENT_SOURCE_DIR}/net/coder)
+set(PATH_RPC    ${CMAKE_CURRENT_SOURCE_DIR}/net/rpc)
 
 file(GLOB COMM_SRC  ${PATH_COMM}/*.cc)
 file(GLOB NET_SRC   ${PATH_NET}/*.cc)
 file(GLOB TCP_SRC   ${PATH_TCP}/*.cc)
 file(GLOB CODER_SRC ${PATH_CODER}/*.cc)
+file(GLOB RPC_SRC   ${PATH_RPC}/*.cc)
 
 # ============================================================
 # 静态库
 # ============================================================
-add_library(lrpc STATIC ${COMM_SRC} ${NET_SRC} ${TCP_SRC} ${CODER_SRC})
+add_library(lrpc STATIC ${COMM_SRC} ${NET_SRC} ${TCP_SRC} ${CODER_SRC} ${RPC_SRC})
 
 # ============================================================
 # 头文件路径

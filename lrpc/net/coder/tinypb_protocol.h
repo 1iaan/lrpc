@@ -7,6 +7,8 @@ namespace lrpc {
 
 struct TinyPBProtocol : public AbstractProtocol {
 public:
+    typedef std::shared_ptr<TinyPBProtocol> s_ptr ;
+
     static char PB_START;
     static char PB_END;
 

@@ -6,6 +6,8 @@
 #include "lrpc/net/tcp/tcp_connection.h"
 #include "lrpc/net/coder/string_coder.h"
 #include "lrpc/net/coder/abs_protocol.h"
+#include "lrpc/net/rpc/rpc_dispatcher.h"
+#include "lrpc/net/tcp/net_addr.h"
 #include "lrpc/net/tcp/tcp_buffer.h"
 #include <cerrno>
 #include <cstddef>
@@ -17,8 +19,8 @@
 
 namespace lrpc{
 
-TcpConnection::TcpConnection(EventLoop* event_loop, int fd, int buffer_size, NetAddr::s_ptr peer_addr, TcpConnectionType type)
-    : peer_addr_(peer_addr), event_loop_(event_loop), fd_(fd), state_(NotConnected), connection_type_(type) {
+TcpConnection::TcpConnection(EventLoop* event_loop, int fd, int buffer_size,NetAddr::s_ptr local_addr, NetAddr::s_ptr peer_addr, TcpConnectionType type)
+    :local_addr_(local_addr), peer_addr_(peer_addr), event_loop_(event_loop), fd_(fd), state_(NotConnected), connection_type_(type) {
     in_buffer = std::make_shared<TcpBuffer>(buffer_size);
     out_buffer = std::make_shared<TcpBuffer>(buffer_size);
 
@@ -116,13 +118,13 @@ void TcpConnection::execute(){
             // 1. 针对每个请求调用rpc方法响应message
             // 2. 将message放入发送缓冲区监听可写事件
             INFOLOG("success get request[%s] fomr client[%s]", result[i]->req_id_.c_str(), peer_addr_->toString().c_str());
-            std::shared_ptr<TinyPBProtocol> msg = std::make_shared<TinyPBProtocol>();
-            msg->pb_data_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->pb_data_;
-            msg->method_name_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->method_name_;
-            msg->req_id_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->req_id_;
+            TinyPBProtocol::s_ptr message = std::make_shared<TinyPBProtocol>();
+            // message->pb_data_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->pb_data_;
+            // message->method_name_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->method_name_;
+            // message->req_id_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->req_id_;
             
-
-            response_messages.push_back(msg);
+            RpcDispatcher::GetRpcDispatcher()->dispatch(result[i], message, this);
+            response_messages.push_back(message);
         }
 
         coder_->encode(response_messages, out_buffer);

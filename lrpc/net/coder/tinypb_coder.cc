@@ -14,7 +14,7 @@ namespace lrpc {
 // 将 message 编码成字节流  ， 写入 buffer
 void TinyPBCoder::encode(std::vector<AbstractProtocol::s_ptr>& messages, TcpBuffer::s_ptr out_buffer){
     for(auto &message: messages){
-        std::shared_ptr<TinyPBProtocol> msg = std::dynamic_pointer_cast<TinyPBProtocol>(message);
+        TinyPBProtocol::s_ptr msg = std::dynamic_pointer_cast<TinyPBProtocol>(message);
         int len = 0;
         const char* buf = encodeTinyPB(msg, len);
 
@@ -74,7 +74,7 @@ void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, Tcp
         if(parse_success){
             buffer->moveReadIndex(end_index - start_index + 1);
 
-            std::shared_ptr<TinyPBProtocol> message = std::make_shared<TinyPBProtocol>();
+            TinyPBProtocol::s_ptr message = std::make_shared<TinyPBProtocol>();
             message->package_len_ = package_len;
 
             // req_id
@@ -151,7 +151,7 @@ void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, Tcp
     }
 }
 
-const char* TinyPBCoder::encodeTinyPB(std::shared_ptr<TinyPBProtocol> msg, int &len){
+const char* TinyPBCoder::encodeTinyPB(TinyPBProtocol::s_ptr msg, int &len){
     if(msg->req_id_.empty()) {
         msg->req_id_ = "randomly";
     }

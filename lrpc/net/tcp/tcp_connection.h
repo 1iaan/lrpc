@@ -13,6 +13,8 @@
 
 namespace lrpc{
 
+class RpcDispatcher;
+
 class TcpConnection{
 public:
     enum TcpState{
@@ -31,7 +33,7 @@ public:
     typedef std::shared_ptr<TcpConnection> s_ptr;
 
     // TcpConnection(IOThread* io_thread, int fd, int buffer_size, NetAddr::s_ptr peer_addr);
-    TcpConnection(EventLoop* event_loop, int fd, int buffer_size, NetAddr::s_ptr peer_addr, TcpConnectionType type);
+    TcpConnection(EventLoop* event_loop, int fd, int buffer_size, NetAddr::s_ptr local_addr, NetAddr::s_ptr peer_addr, TcpConnectionType type);
 
     ~TcpConnection();
 
@@ -61,6 +63,8 @@ public:
 
     void pushReadMessage(std::string req_id, std::function<void(AbstractProtocol::s_ptr)> callback);
 
+    IPNetAddr::s_ptr getLocalAddr(){ return local_addr_; }
+    IPNetAddr::s_ptr getPeerAddr(){ return peer_addr_; }
 private:
     // 通信的两个对端
     NetAddr::s_ptr local_addr_;

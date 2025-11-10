@@ -2169,6 +2169,9 @@ void TcpConnection::pushReadMessage(std::string req_id, std::function<void(Abstr
 
 当ReadMessage的时候，会监听可读事件，可读发生才会执行回调，WriteMessage会监听可写事件。
 
+Client也需要使用主从Reactor，主Reactor负责连接和添加新的事件，从Reactor负责发送新的事件。
+Server执行完之后会清除事件。
+
 ### tcp_client.cc
 ```c++
 TcpClient::TcpClient(NetAddr::s_ptr peer_addr):peer_addr_(peer_addr){
@@ -2306,12 +2309,107 @@ private:
 ```
 
 基于Protobuf的RPC协议编码  
-基于Protobuf的RPC协议解码  
+基于Protobuf的RPC协议解码 
+
+### ProtoBuf
+
+ProtoBuf 最核心的内容是反射，
+```c++
+const google::protobuf::MethodDescriptor* method = service->GetDescriptor()->FindMethodByName(method_name);
+google::protobuf::Message* req_msg = service->GetRequestPrototype(method).New();
+google::protobuf::Message* rsp_msg = service->GetResponsePrototype(method).New();
+service->CallMethod(method, &controller, req_msg, rsp_msg, nullptr);
+```
+通过这种方式可以得到method_name对应的类型  
+编译时生成元信息（metadata） → 运行时用这些信息操控对象
+
+反射就是程序可以用一些元信息在程序运行过程中创建相应的对象，这个对象本身是存在于代码中的，但是运行的时候才确定是哪个。  
+具体的：
+```c++
+class Object{
+    virtual void set(const std::string& field, const std::string& value) = 0;
+};
+
+class User: public Object{
+    string name;
+    int age;
+    
+    void set(const std::string& field, const std::string& value){
+        if(field = "name") name = value;
+        else if(field = "age") age = atoi(value);
+    }
+};
+
+std::unordered_map<std::string, std::function<Object*()>> registry;
+
+void registerClass(const std::string& name, std::function<Object*()> creator) {
+    registry[name] = creator;
+}
+
+Object* createObject(const std::string& name) {
+    auto it = registry.find(name);
+    if (it != registry.end()) {
+        return it->second(); // 调用对应的构造函数
+    }
+    return nullptr;
+}
+```
+这样的类User就是一个反射类，可以实现：
+```c++
+registerClass("User", User::create);
+Object* obj1 = createObject("User"); 
+```
+
+
+ProtoBuf 通过proto文件定义出具体的service(继承Service)和request/response(基础Message)  
+```proto
+message makeOrderRequest {
+    int32 price = 1;
+    string goods = 2;
+};
+message makeOrderResponse {
+    int32 ret_code = 1;
+    string res_info = 2;
+    string order_id = 3;
+};
+service OrderService{
+    rpc make_order(makeOrderRequest) returns (makeOrderResponse);
+}
+```
+service中有定义好的方法接口，他会实现一套switch/map结构，将方法名导向具体的方法  
+```c++
+class OrderService : public service {
+    void make_order(controller, request, response, callback);
+
+    bool CallMethod(method, controller,Message* req,Message* res, callback){
+        if(method == "make_order"){
+            makeorder((makeOrderRequest)req, (makeOrderResponse)res);
+        }
+    }
+};
+```
+我们自己的函数继承OrderService, 实现了make_order, 从而让service->CallMethod可以调用我们写的方法。
+```c++
+service->CallMethod(method, &controller, req_msg, rsp_msg, NULL);
+```
+
+
 ## 模块封装
-RpcController  
-RpcClosesure  
-RpcDisPatcher  
-RpcChannel和RpcAsyncChannel  
+### RpcDisPatcher  
+RPC服务端流程
+初始化：注册OrderService对象
+1. 从 buffer 读取数据，decode 得到请求的TinyPBProtocol对象。
+2. 从 TinyPBProtocol 里得到 method_name，从 OrderService 对象里通过 service.method_name 找到方法 func
+3. 找到对应的 request_type 和 response_type
+4. 将请求体里的 pb_data 反序列化为 request_type 的一个对象，声明一个空的 response_type 对象
+5. func(request, response)
+6. 将 response 对象序列化为 pb_data，再塞入到 TinyPBProtocol 结构体中
+7. encode 发送回包
+
+### RpcController  
+
+### RpcClosesure  
+### RpcChannel和RpcAsyncChannel  
 # 项目完善
 日志完善和优化  
 代码生成工具脚手架封装  

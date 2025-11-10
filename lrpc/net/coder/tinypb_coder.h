@@ -17,7 +17,7 @@ public:
     void decode(std::vector<AbstractProtocol::s_ptr>& out_messages, TcpBuffer::s_ptr buffer);
 
 private:
-    const char* encodeTinyPB(std::shared_ptr<TinyPBProtocol> msg, int &len);
+    const char* encodeTinyPB(TinyPBProtocol::s_ptr msg, int &len);
 
 };
 
