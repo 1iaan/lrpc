@@ -1,9 +1,11 @@
 #include "lrpc/common/log.h"
+#include "lrpc/net/coder/tinypb_coder.h"
+#include "lrpc/net/coder/tinypb_protocol.h"
 #include "lrpc/net/fd_event.h"
 #include "lrpc/net/fd_event_group.h"
 #include "lrpc/net/tcp/tcp_connection.h"
-#include "lrpc/net/string_coder.h"
-#include "lrpc/net/abs_protocol.h"
+#include "lrpc/net/coder/string_coder.h"
+#include "lrpc/net/coder/abs_protocol.h"
 #include "lrpc/net/tcp/tcp_buffer.h"
 #include <cerrno>
 #include <cstddef>
@@ -32,7 +34,8 @@ TcpConnection::TcpConnection(EventLoop* event_loop, int fd, int buffer_size, Net
     // 他发送connect后必须等待回包才说明连接成功
     // 可读的OnRead可以执行的前提是连接已经建立
 
-    coder_ = new StringCoder();
+    // coder_ = new StringCoder();
+    coder_ = new TinyPBCoder();
 }
 
 TcpConnection::~TcpConnection(){
@@ -102,21 +105,27 @@ void TcpConnection::execute(){
     if(connection_type_ == ClientConnectionByServer){
         DEBUGLOG("server execute");
         // 将RPC请求执行业务逻辑，获取RPC响应，发送回去
-        std::vector<char> tmp;
-        int size = in_buffer->readable();
-        tmp.resize(size);
+        // std::vector<char> tmp;
+        // int size = in_buffer->readable();
+        // tmp.resize(size);
+        // in_buffer->readFromBuf(tmp, size);
+        std::vector<AbstractProtocol::s_ptr> result;
+        std::vector<AbstractProtocol::s_ptr> response_messages;
+        coder_->decode(result, in_buffer);
+        for(size_t i = 0;i < result.size(); ++ i){
+            // 1. 针对每个请求调用rpc方法响应message
+            // 2. 将message放入发送缓冲区监听可写事件
+            INFOLOG("success get request[%s] fomr client[%s]", result[i]->req_id_.c_str(), peer_addr_->toString().c_str());
+            std::shared_ptr<TinyPBProtocol> msg = std::make_shared<TinyPBProtocol>();
+            msg->pb_data_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->pb_data_;
+            msg->method_name_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->method_name_;
+            msg->req_id_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->req_id_;
+            
 
-        in_buffer->readFromBuf(tmp, size);
-
-        std::string msg;
-        for(int i = 0;i < tmp.size(); ++ i){
-            msg += tmp[i];
+            response_messages.push_back(msg);
         }
-        INFOLOG("success get request[%s] fomr client[%s]", tmp.data(), peer_addr_->toString().c_str());
 
-        // echo
-        out_buffer->writeToBuf(tmp.data(), tmp.size());
-
+        coder_->encode(response_messages, out_buffer);
         listenWrite();
     }
     // 客户端逻辑，对端是服务端
@@ -127,7 +136,7 @@ void TcpConnection::execute(){
         coder_->decode(out_messages, in_buffer);
 
         for(size_t i = 0; i < out_messages.size(); ++ i){
-            std::string req_id = out_messages[i]->getReqId();
+            std::string req_id = out_messages[i]->req_id_;
             auto it = read_callbacks_.find(req_id);
             if( it != read_callbacks_.end()){
                 it->second(out_messages[i]->shared_from_this());

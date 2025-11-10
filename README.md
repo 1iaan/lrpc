@@ -1914,7 +1914,7 @@ private:
 
     TcpConnectionType connection_type_{TcpConnectionType::ServerConnectionByClient};
 
-    // key = message->getReqId() value = callback
+    // key = message->req_id_ value = callback
     std::vector<
         std::pair<AbstractProtocol::s_ptr, std::function<void(AbstractProtocol::s_ptr)>>
     > write_callbacks_;
@@ -2041,7 +2041,7 @@ void TcpConnection::execute(){
         coder_->decode(out_messages, in_buffer);
 
         for(size_t i = 0; i < out_messages.size(); ++ i){
-            std::string req_id = out_messages[i]->getReqId();
+            std::string req_id = out_messages[i]->req_id_;
             auto it = read_callbacks_.find(req_id);
             if( it != read_callbacks_.end()){
                 it->second(out_messages[i]->shared_from_this());
@@ -2167,6 +2167,8 @@ void TcpConnection::pushReadMessage(std::string req_id, std::function<void(Abstr
 - -1 errno=EINPROGRESS 表示连接正在建立，此时可以添加到epoll去监听其可写事件。等待可写就绪，调用getsockopt获取fd上的错误，0代表连接成功。
 - 其他errno
 
+当ReadMessage的时候，会监听可读事件，可读发生才会执行回调，WriteMessage会监听可写事件。
+
 ### tcp_client.cc
 ```c++
 TcpClient::TcpClient(NetAddr::s_ptr peer_addr):peer_addr_(peer_addr){
@@ -2283,7 +2285,26 @@ private:
 ```
 
 # RPC  
+为什么要定义一个RPC协议，既然做了ProtoBuf序列化，为什么不把序列化结果直接发送？
+- 为了方便分割两个请求，protobuf序列化结果是一串无意义的字节流，无法区分哪里是开始哪里是结束。
+- 为了定位：加上MsgId等信息，帮助匹配一次的RPC请求和响应，不会串包
+- 错误提升：加上错误信息，定位RPC失败的原因
 ## 协议封装  
+### Tiny ProtoBuf Protocol
+大端存储/小端存储  
+由于不同电脑对int类型解读的方式不同，所以默认网络上的是大端序，在本地再转换成本地字节序(htonl/htons)  
+大端是高位存储在低地址
+```scss
+[Start 0x02]
+[包长度]                            // 包含开始和结束
+[MsgID长度][MsgId]                  // 标识唯一RPC请求
+[Func长度][Func]                    // RPC方法完整名
+[ErrMsgCode][ErrMsgLength][ErrMsg]  // 错误信息
+[ProtoBufData]                      // 序列化数据
+[CheckSum]                          // 校验和
+[End 0x03]
+```
+
 基于Protobuf的RPC协议编码  
 基于Protobuf的RPC协议解码  
 ## 模块封装
@@ -2428,7 +2449,7 @@ int main(){
 #include "lrpc/common/config.h"
 #include "lrpc/net/tcp/net_addr.h"
 #include "lrpc/net/tcp/tcp_connection.h"
-#include "lrpc/net/string_coder.h"
+#include "lrpc/net/coder/string_coder.h"
 #include "lrpc/net/tcp/tcp_client.h"
 #include <arpa/inet.h>
 #include <memory>
@@ -2482,18 +2503,18 @@ void test_client(){
         std::shared_ptr<lrpc::StringProtocol> message = std::make_shared<lrpc::StringProtocol>("12345", "hello lrpc");
         
         client.writeMessage(message, [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
-            DEBUGLOG("client write message success, req_id=[%s]", msg_ptr->getReqId().c_str());
+            DEBUGLOG("client write message success, req_id=[%s]", msg_ptr->req_id_.c_str());
         });
 
         client.readMessage("12345", [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
             std::shared_ptr<lrpc::StringProtocol> message = std::dynamic_pointer_cast<lrpc::StringProtocol>(msg_ptr);
             DEBUGLOG("client read message success, req_id=[%s], msg=[%s]", 
-                message->getReqId().c_str(), message->getMsg().c_str()
+                message->req_id_.c_str(), message->msg_.c_str()
             );
         });
 
         client.writeMessage(message, [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
-            DEBUGLOG("client write message success, req_id=[%s]", msg_ptr->getReqId().c_str());
+            DEBUGLOG("client write message success, req_id=[%s]", msg_ptr->req_id_.c_str());
         });
     });
 }

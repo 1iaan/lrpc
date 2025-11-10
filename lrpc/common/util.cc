@@ -1,6 +1,9 @@
 #include "lrpc/common/util.h"
 #include <cstdarg>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <netinet/in.h>
 #include <sys/select.h>
 #include <unistd.h>
  #include <sys/time.h>
@@ -28,6 +31,13 @@ int64_t get_now_ms(){
     timeval time;
     gettimeofday(&time, NULL);
     return time.tv_sec * 1000 + time.tv_usec / 1000;
+}
+
+// long 32 4B
+int32_t getInt32FromNetByte(const char* buf){
+    int32_t re;
+    memcpy(&re, buf, sizeof(re));
+    return ntohl(re);
 }
 
 } // namespace lrpc

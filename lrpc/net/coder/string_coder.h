@@ -1,13 +1,13 @@
 #pragma once
 
-#include "lrpc/net/abs_coder.h"
-#include "lrpc/net/abs_protocol.h"
+#include "lrpc/net/coder/abs_coder.h"
+#include "lrpc/net/coder/abs_protocol.h"
 #include <cstddef>
 #include <memory>
 
 namespace lrpc{
 
-class StringProtocol : public AbstractProtocol {
+struct StringProtocol : public AbstractProtocol {
 public:
     StringProtocol() = default;
     StringProtocol(const std::string &req_id, const std::string& s): msg_(s) {
@@ -15,12 +15,10 @@ public:
     }
 
 public:
-    std::string getMsg() { return msg_; }
-    void setMsg(std::string & msg) { msg_ = msg; }
 
     std::string getBytesStream() { return req_id_ +  "/" + msg_; }
 
-private:
+public:
     std::string msg_;
 }; 
 

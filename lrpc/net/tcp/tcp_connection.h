@@ -1,9 +1,9 @@
 #pragma once
 
-#include "lrpc/net/abs_coder.h"
+#include "lrpc/net/coder/abs_coder.h"
 #include "lrpc/net/fd_event.h"
 #include "lrpc/net/io_thread.h"
-#include "lrpc/net/abs_protocol.h"
+#include "lrpc/net/coder/abs_protocol.h"
 #include "lrpc/net/tcp/net_addr.h"
 #include "lrpc/net/tcp/tcp_buffer.h"
 #include <cstddef>
@@ -82,7 +82,7 @@ private:
 
     TcpConnectionType connection_type_{TcpConnectionType::ServerConnectionByClient};
 
-    // key = message->getReqId() value = callback
+    // key = message->req_id_ value = callback
     std::vector<
         std::pair<AbstractProtocol::s_ptr, std::function<void(AbstractProtocol::s_ptr)>>
     > write_callbacks_;

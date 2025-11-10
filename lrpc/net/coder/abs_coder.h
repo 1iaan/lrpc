@@ -1,7 +1,7 @@
 #pragma once
 
 #include "lrpc/net/tcp/tcp_buffer.h"
-#include "lrpc/net/abs_protocol.h"
+#include "lrpc/net/coder/abs_protocol.h"
 
 namespace lrpc{
 
