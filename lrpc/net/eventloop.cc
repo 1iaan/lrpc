@@ -148,6 +148,8 @@ void EventLoop::loop(){
 
         }
     }
+
+    DEBUGLOG("eventloop [%d] stop", tid_);
 }
 
 void EventLoop::wakeup(){
@@ -156,6 +158,7 @@ void EventLoop::wakeup(){
 
 void EventLoop::stop(){
     stop_ = true;
+    wakeup();
 }
 
 void EventLoop::dealWakeup(){

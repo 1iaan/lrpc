@@ -10,13 +10,13 @@ namespace lrpc{
 struct StringProtocol : public AbstractProtocol {
 public:
     StringProtocol() = default;
-    StringProtocol(const std::string &req_id, const std::string& s): msg_(s) {
-        req_id_ = req_id;
+    StringProtocol(const std::string &msg_id, const std::string& s): msg_(s) {
+        msg_id_ = msg_id;
     }
 
 public:
 
-    std::string getBytesStream() { return req_id_ +  "/" + msg_; }
+    std::string getBytesStream() { return msg_id_ +  "/" + msg_; }
 
 public:
     std::string msg_;
@@ -46,10 +46,10 @@ public:
         }
 
         // 分割成功，第一部分是 req，第二部分是 msg
-        std::string req_id = data.substr(0, pos);
+        std::string msg_id = data.substr(0, pos);
         std::string msg = data.substr(pos + 1);
 
-        std::shared_ptr<StringProtocol> message = std::make_shared<StringProtocol>(req_id, msg); 
+        std::shared_ptr<StringProtocol> message = std::make_shared<StringProtocol>(msg_id, msg); 
 
         
         out_messages.push_back(message);

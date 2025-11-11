@@ -117,11 +117,11 @@ void TcpConnection::execute(){
         for(size_t i = 0;i < result.size(); ++ i){
             // 1. 针对每个请求调用rpc方法响应message
             // 2. 将message放入发送缓冲区监听可写事件
-            INFOLOG("success get request[%s] fomr client[%s]", result[i]->req_id_.c_str(), peer_addr_->toString().c_str());
+            INFOLOG("success get request[%s] fomr client[%s]", result[i]->msg_id_.c_str(), peer_addr_->toString().c_str());
             TinyPBProtocol::s_ptr message = std::make_shared<TinyPBProtocol>();
             // message->pb_data_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->pb_data_;
             // message->method_name_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->method_name_;
-            // message->req_id_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->req_id_;
+            // message->msg_id_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->msg_id_;
             
             RpcDispatcher::GetRpcDispatcher()->dispatch(result[i], message, this);
             response_messages.push_back(message);
@@ -138,8 +138,8 @@ void TcpConnection::execute(){
         coder_->decode(out_messages, in_buffer);
 
         for(size_t i = 0; i < out_messages.size(); ++ i){
-            std::string req_id = out_messages[i]->req_id_;
-            auto it = read_callbacks_.find(req_id);
+            std::string msg_id = out_messages[i]->msg_id_;
+            auto it = read_callbacks_.find(msg_id);
             if( it != read_callbacks_.end()){
                 it->second(out_messages[i]->shared_from_this());
             }
@@ -153,7 +153,7 @@ void TcpConnection::onWrite(){
         return ;
     }
 
-    // 对端是服务端
+    // 客户端，对端是服务端
     // 1. 编码message到outbuffer
     if (connection_type_ == ServerConnectionByClient){
         // 将数据写入到 buffer 
@@ -197,7 +197,7 @@ void TcpConnection::onWrite(){
         event_loop_->addEpollEvent(fd_event_);
     }
 
-    // 4.如果是对端是服务端，执行回调函数
+    // 4. 为客户端，对端是服务端，执行回调函数
     if(connection_type_ == ServerConnectionByClient){
         for(size_t i = 0;i < write_callbacks_.size(); ++ i){
             write_callbacks_[i].second(write_callbacks_[i].first);
@@ -250,8 +250,8 @@ void TcpConnection::pushSendMessage(AbstractProtocol::s_ptr message, std::functi
     write_callbacks_.push_back(std::make_pair(message, callback));
 }
 
-void TcpConnection::pushReadMessage(std::string req_id, std::function<void(AbstractProtocol::s_ptr)> callback){
-    read_callbacks_.insert(std::make_pair(req_id, callback));
+void TcpConnection::pushReadMessage(std::string msg_id, std::function<void(AbstractProtocol::s_ptr)> callback){
+    read_callbacks_.insert(std::make_pair(msg_id, callback));
 }
 
 }   // namespace lrpc

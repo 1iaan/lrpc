@@ -16,8 +16,8 @@ public:
     
     int32_t package_len_{0};
 
-    int32_t req_id_len_{0};
-    // req_id 继承父类
+    int32_t msg_id_len_{0};
+    // msg_id 继承父类
     
     int32_t method_name_len_{0};
     std::string method_name_;

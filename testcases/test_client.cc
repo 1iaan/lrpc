@@ -56,29 +56,29 @@ void test_client(){
         
         // std::shared_ptr<lrpc::StringProtocol> message = std::make_shared<lrpc::StringProtocol>("12345", "hello lrpc");
         std::shared_ptr<lrpc::TinyPBProtocol> message = std::make_shared<lrpc::TinyPBProtocol>();
-        message->req_id_ = "12345";
+        message->msg_id_ = "12345";
         message->pb_data_ = "test pb data";
         message->method_name_ = "test method name";
 
         client.writeMessage(message, [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
-            DEBUGLOG("client write message success, req_id=[%s]", msg_ptr->req_id_.c_str());
+            DEBUGLOG("client write message success, msg_id=[%s]", msg_ptr->msg_id_.c_str());
         });
 
         // client.readMessage("12345", [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
         //     std::shared_ptr<lrpc::StringProtocol> message = std::dynamic_pointer_cast<lrpc::StringProtocol>(msg_ptr);
-        //     DEBUGLOG("client read message success, req_id=[%s], msg=[%s]", 
-        //         message->req_id_.c_str(), message->msg_.c_str()
+        //     DEBUGLOG("client read message success, msg_id=[%s], msg=[%s]", 
+        //         message->msg_id_.c_str(), message->msg_.c_str()
         //     );
         // });
         client.readMessage("12345", [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
             std::shared_ptr<lrpc::TinyPBProtocol> message = std::dynamic_pointer_cast<lrpc::TinyPBProtocol>(msg_ptr);
-            DEBUGLOG("client read message success, req_id=[%s], get response=[%s,%s]", 
-                message->req_id_.c_str(), message->method_name_.c_str(), message->pb_data_.c_str()
+            DEBUGLOG("client read message success, msg_id=[%s], get response=[%s,%s]", 
+                message->msg_id_.c_str(), message->method_name_.c_str(), message->pb_data_.c_str()
             );
         });
 
         // client.writeMessage(message, [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
-        //     DEBUGLOG("client write message success, req_id=[%s]", msg_ptr->req_id_.c_str());
+        //     DEBUGLOG("client write message success, msg_id=[%s]", msg_ptr->msg_id_.c_str());
         // });
     });
 }

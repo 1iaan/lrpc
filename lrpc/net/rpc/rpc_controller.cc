@@ -6,7 +6,7 @@ namespace lrpc{
 void RpcController::Reset(){
     error_code_ = 0;
     error_info_ = "";
-    req_id_ = "";
+    msg_id_ = "";
 
     is_failed_ = false;
     is_canceled_ = false;
@@ -46,6 +46,7 @@ void RpcController::NotifyOnCancel(google::protobuf::Closure* callback){
 void RpcController::setError(int32_t err_code, const std::string err_info){
     error_code_ = err_code;
     error_info_ = err_info;
+    is_failed_ = true;
 }
 
 int32_t RpcController::getErrorCode(){
@@ -56,12 +57,12 @@ std::string RpcController::getErrorInfo(){
     return error_info_;
 }
 
-void RpcController::setReqId(const std::string& req_id){
-    req_id_ = req_id;
+void RpcController::setMsgId(const std::string& msg_id){
+    msg_id_ = msg_id;
 }
 
-std::string RpcController::getReqId(){
-    return req_id_;
+std::string RpcController::getMsgId(){
+    return msg_id_;
 }
 
 void RpcController::setLocalAddr(NetAddr::s_ptr addr){

@@ -12,7 +12,7 @@ public:
     virtual ~AbstractProtocol() = default;
 
 public:
-    std::string req_id_;    // 请求号，唯一标识一个请求或响应
+    std::string msg_id_;    // 请求号，唯一标识一个请求或响应
 
 
 private:

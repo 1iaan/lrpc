@@ -7,6 +7,8 @@ namespace lrpc{
 class RpcClousre: public google::protobuf::Closure{
 public:
     RpcClousre(){};
+    RpcClousre(std::function<void()> cb) { callback_ = cb; }
+    
     ~RpcClousre(){};
     void Run() override;
 

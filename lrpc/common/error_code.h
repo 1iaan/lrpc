@@ -3,7 +3,7 @@
 namespace lrpc{
 
 #ifndef SYS_ERROR_PREFIX
-#define SYS_ERROR_PREFIX(xx) 0266##xx
+#define SYS_ERROR_PREFIX(xx) 266##xx
 
 #endif
 
@@ -16,5 +16,7 @@ const int ERROR_FAILED_SERIALIZE = SYS_ERROR_PREFIX(0004);      // 序列化
 const int ERROR_PARSE_SERVICE_NAME = SYS_ERROR_PREFIX(0005);
 const int ERROR_SERVICE_NOT_FOUND = SYS_ERROR_PREFIX(0006);
 const int ERROR_METHOD_NOT_FOUND = SYS_ERROR_PREFIX(0007);
+
+const int ERROR_CHANNEL_INIT = SYS_ERROR_PREFIX(0008);
 
 } // namespace lrpc

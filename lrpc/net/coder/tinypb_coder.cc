@@ -77,24 +77,24 @@ void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, Tcp
             TinyPBProtocol::s_ptr message = std::make_shared<TinyPBProtocol>();
             message->package_len_ = package_len;
 
-            // req_id
-            int req_id_len_index = start_index + sizeof(char) + sizeof(message->package_len_);
-            if(req_id_len_index >= end_index){
+            // msg_id
+            int msg_id_len_index = start_index + sizeof(char) + sizeof(message->package_len_);
+            if(msg_id_len_index >= end_index){
                 message->parse_success_ = false;
-                ERRORLOG("parse error, req_len[%d] > end_index[%d]", req_id_len_index, end_index);
+                ERRORLOG("parse error, req_len[%d] > end_index[%d]", msg_id_len_index, end_index);
                 continue;
             }
-            message->req_id_len_ = getInt32FromNetByte(&tmp[req_id_len_index]);
-            DEBUGLOG("parse req_id_len=%d", message->req_id_len_);
+            message->msg_id_len_ = getInt32FromNetByte(&tmp[msg_id_len_index]);
+            DEBUGLOG("parse msg_id_len=%d", message->msg_id_len_);
 
-            int req_id_index = req_id_len_index + sizeof(message->req_id_len_);
-            char req_id[100] = {0};
-            memcpy(&req_id[0], &tmp[req_id_index], message->req_id_len_);
-            message->req_id_ = std::string(req_id);
-            DEBUGLOG("parse req_id=%s", message->req_id_.c_str());
+            int msg_id_index = msg_id_len_index + sizeof(message->msg_id_len_);
+            char msg_id[100] = {0};
+            memcpy(&msg_id[0], &tmp[msg_id_index], message->msg_id_len_);
+            message->msg_id_ = std::string(msg_id);
+            DEBUGLOG("parse msg_id=%s", message->msg_id_.c_str());
 
             // method
-            int method_name_len_index = req_id_index + message->req_id_len_;
+            int method_name_len_index = msg_id_index + message->msg_id_len_;
             if(method_name_len_index >= end_index){
                 message->parse_success_ = false;
                 ERRORLOG("parse error, method_len_index[%d] > end_index[%d]", method_name_len_index, end_index);
@@ -135,7 +135,7 @@ void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, Tcp
             DEBUGLOG("parse err_info=%s", message->err_info_.c_str());
 
             // pbdata
-            int pb_data_len = message->package_len_ - message->method_name_len_ - message->req_id_len_ -
+            int pb_data_len = message->package_len_ - message->method_name_len_ - message->msg_id_len_ -
                 -message->err_info_len_ - 2 - 24;
             
             int pb_data_index = err_info_index + message->err_info_len_;
@@ -146,20 +146,20 @@ void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, Tcp
             message->parse_success_ = true;
 
             out_messages.push_back(message);
-            DEBUGLOG("decode message[%s] success", message->req_id_.c_str());
+            DEBUGLOG("decode message[%s] success", message->msg_id_.c_str());
         }
     }
 }
 
 const char* TinyPBCoder::encodeTinyPB(TinyPBProtocol::s_ptr msg, int &len){
-    if(msg->req_id_.empty()) {
-        msg->req_id_ = "randomly";
+    if(msg->msg_id_.empty()) {
+        msg->msg_id_ = "randomly";
     }
-    DEBUGLOG("get req_id=%s", msg->req_id_.c_str());
+    DEBUGLOG("get msg_id=%s", msg->msg_id_.c_str());
 
     // package
 
-    int package_len = 2 + 24 + msg->req_id_.length() + msg->method_name_.length() + msg->err_info_.length() + msg->pb_data_.length();
+    int package_len = 2 + 24 + msg->msg_id_.length() + msg->method_name_.length() + msg->err_info_.length() + msg->pb_data_.length();
     DEBUGLOG("get package_len=%d", package_len);
 
     char* buf = reinterpret_cast<char *>(malloc(package_len));
@@ -172,15 +172,15 @@ const char* TinyPBCoder::encodeTinyPB(TinyPBProtocol::s_ptr msg, int &len){
     memcpy(tmp, &package_len_net, sizeof(package_len_net));
     tmp += sizeof(package_len_net);
 
-    // req_id
-    int req_id_len = msg->req_id_.length();
-    int req_id_len_net = htonl(req_id_len);
-    memcpy(tmp, &req_id_len_net, sizeof(req_id_len_net));
-    tmp += sizeof(req_id_len_net);
+    // msg_id
+    int msg_id_len = msg->msg_id_.length();
+    int msg_id_len_net = htonl(msg_id_len);
+    memcpy(tmp, &msg_id_len_net, sizeof(msg_id_len_net));
+    tmp += sizeof(msg_id_len_net);
 
-    if(!msg->req_id_.empty()){
-        memcpy(tmp, &msg->req_id_[0], req_id_len);
-        tmp += req_id_len;
+    if(!msg->msg_id_.empty()){
+        memcpy(tmp, &msg->msg_id_[0], msg_id_len);
+        tmp += msg_id_len;
     }
 
     // method
@@ -224,14 +224,14 @@ const char* TinyPBCoder::encodeTinyPB(TinyPBProtocol::s_ptr msg, int &len){
     *tmp = TinyPBProtocol::PB_END;
 
     msg->package_len_ = package_len;
-    msg->req_id_len_ = req_id_len;
+    msg->msg_id_len_ = msg_id_len;
     msg->method_name_len_ = method_name_len;
     msg->err_info_len_ = err_info_len;
     msg->parse_success_ = true;
 
     len = package_len;
 
-    DEBUGLOG("encode message[%s] success", msg->req_id_.c_str());
+    DEBUGLOG("encode message[%s] success", msg->msg_id_.c_str());
     return buf;
 }
 

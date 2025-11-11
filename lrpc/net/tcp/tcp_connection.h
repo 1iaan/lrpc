@@ -61,7 +61,7 @@ public:
 
     void pushSendMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback);
 
-    void pushReadMessage(std::string req_id, std::function<void(AbstractProtocol::s_ptr)> callback);
+    void pushReadMessage(std::string msg_id, std::function<void(AbstractProtocol::s_ptr)> callback);
 
     IPNetAddr::s_ptr getLocalAddr(){ return local_addr_; }
     IPNetAddr::s_ptr getPeerAddr(){ return peer_addr_; }
@@ -86,7 +86,7 @@ private:
 
     TcpConnectionType connection_type_{TcpConnectionType::ServerConnectionByClient};
 
-    // key = message->req_id_ value = callback
+    // key = message->msg_id_ value = callback
     std::vector<
         std::pair<AbstractProtocol::s_ptr, std::function<void(AbstractProtocol::s_ptr)>>
     > write_callbacks_;

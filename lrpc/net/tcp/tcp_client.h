@@ -3,11 +3,13 @@
 #include "lrpc/net/tcp/tcp_connection.h"
 #include "lrpc/net/eventloop.h"
 #include "lrpc/net/coder/abs_protocol.h"
+#include <memory>
 namespace lrpc {
 
 class TcpClient {
 
 public: 
+    typedef std::shared_ptr<TcpClient> s_ptr;
     TcpClient(NetAddr::s_ptr peer_addr);
 
     ~TcpClient();
@@ -23,9 +25,9 @@ public:
 
     // 异步接收 message
     // 接收成功会调用callback， callback入参是message对象
-    void readMessage(const std::string &req_id, std::function<void(AbstractProtocol::s_ptr)> callback);
+    void readMessage(const std::string &msg_id, std::function<void(AbstractProtocol::s_ptr)> callback);
 
-
+    void stop();
 private:
     NetAddr::s_ptr peer_addr_;
     EventLoop* event_loop_{NULL};

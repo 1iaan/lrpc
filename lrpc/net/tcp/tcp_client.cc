@@ -80,11 +80,17 @@ void TcpClient::writeMessage(AbstractProtocol::s_ptr message, std::function<void
     connection_->listenWrite();
 }
 
-void TcpClient::readMessage(const std::string &req_id, std::function<void(AbstractProtocol::s_ptr)> callback){
+void TcpClient::readMessage(const std::string &msg_id, std::function<void(AbstractProtocol::s_ptr)> callback){
     //1. 启动connection可读事件
-    //2. 从buffer中解码读出message, 判断 req_id 是否相等，相等则读成功，执行其回调。
-    connection_->pushReadMessage(req_id, callback);
+    //2. 从buffer中解码读出message, 判断 msg_id 是否相等，相等则读成功，执行其回调。
+    connection_->pushReadMessage(msg_id, callback);
     connection_->listenRead();
+}
+
+void TcpClient::stop(){
+    if(event_loop_->isLooping()){
+        event_loop_->stop();
+    }
 }
 
 } // namespace lrpc

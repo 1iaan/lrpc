@@ -1809,7 +1809,7 @@ void TcpServer::onAccept(){
 - onRead 时
     1. 从 socket 缓冲区调用 read 读取字节流到 inbuffer 里
     2. 从 inbuffer 中 decode 得到 message
-    3. message 的 req_id 符合，则执行其注册时候的回调
+    3. message 的 msg_id 符合，则执行其注册时候的回调
 - onWrite时
     1. 把 client push 的 messages encode到 outbuffer
     2. 从 outbuffer 调用 write 写字节流到 socket 缓冲区
@@ -1835,11 +1835,11 @@ void TcpServer::onAccept(){
     2. 如果全部发送完成，取消listenRead
 
 全过程
-1. client：调用writeMessage，listenWrite 并记录消息(req_id+msg)、回调
+1. client：调用writeMessage，listenWrite 并记录消息(msg_id+msg)、回调
 2. client：发现可写，触发onWrite， encode message 到 outbuffer 然后发送到 socke，发送完毕取消listenWrite, 执行回调
 3. server：发现可读，触发OnRead，从socket读取到inbuffer，协议解析执行，写回 outbuffer，listenWrite
 4. server：发现可写，触发OnWrite, 将 outbuffer 发送到socket
-5. client：调用readMessage，listenRead 并且记录req_id、回调
+5. client：调用readMessage，listenRead 并且记录msg_id、回调
 6. client：发现可读，除法OnRead，从socket读取到inbuffer，decode 得到 message，执行回调（操作message）
     
 
@@ -1891,7 +1891,7 @@ public:
 
     void pushSendMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback);
 
-    void pushReadMessage(std::string req_id, std::function<void(AbstractProtocol::s_ptr)> callback);
+    void pushReadMessage(std::string msg_id, std::function<void(AbstractProtocol::s_ptr)> callback);
 
 private:
     // 通信的两个对端
@@ -1914,7 +1914,7 @@ private:
 
     TcpConnectionType connection_type_{TcpConnectionType::ServerConnectionByClient};
 
-    // key = message->req_id_ value = callback
+    // key = message->msg_id_ value = callback
     std::vector<
         std::pair<AbstractProtocol::s_ptr, std::function<void(AbstractProtocol::s_ptr)>>
     > write_callbacks_;
@@ -2041,8 +2041,8 @@ void TcpConnection::execute(){
         coder_->decode(out_messages, in_buffer);
 
         for(size_t i = 0; i < out_messages.size(); ++ i){
-            std::string req_id = out_messages[i]->req_id_;
-            auto it = read_callbacks_.find(req_id);
+            std::string msg_id = out_messages[i]->msg_id_;
+            auto it = read_callbacks_.find(msg_id);
             if( it != read_callbacks_.end()){
                 it->second(out_messages[i]->shared_from_this());
             }
@@ -2153,8 +2153,8 @@ void TcpConnection::pushSendMessage(AbstractProtocol::s_ptr message, std::functi
     write_callbacks_.push_back(std::make_pair(message, callback));
 }
 
-void TcpConnection::pushReadMessage(std::string req_id, std::function<void(AbstractProtocol::s_ptr)> callback){
-    read_callbacks_.insert(std::make_pair(req_id, callback));
+void TcpConnection::pushReadMessage(std::string msg_id, std::function<void(AbstractProtocol::s_ptr)> callback){
+    read_callbacks_.insert(std::make_pair(msg_id, callback));
 }
 ```
 
@@ -2246,10 +2246,10 @@ void TcpClient::writeMessage(AbstractProtocol::s_ptr message, std::function<void
     connection_->listenWrite();
 }
 
-void TcpClient::readMessage(const std::string &req_id, std::function<void(AbstractProtocol::s_ptr)> callback){
+void TcpClient::readMessage(const std::string &msg_id, std::function<void(AbstractProtocol::s_ptr)> callback){
     //1. 启动connection可读事件
-    //2. 从buffer中解码读出message, 判断 req_id 是否相等，相等则读成功，执行其回调。
-    connection_->pushReadMessage(req_id, callback);
+    //2. 从buffer中解码读出message, 判断 msg_id 是否相等，相等则读成功，执行其回调。
+    connection_->pushReadMessage(msg_id, callback);
     connection_->listenRead();
 }
 ```
@@ -2274,7 +2274,7 @@ public:
 
     // 异步接收 message
     // 接收成功会调用callback， callback入参是message对象
-    void readMessage(const std::string &req_id, std::function<void(AbstractProtocol::s_ptr)> callback);
+    void readMessage(const std::string &msg_id, std::function<void(AbstractProtocol::s_ptr)> callback);
 
 
 private:
@@ -2292,6 +2292,8 @@ private:
 - 为了方便分割两个请求，protobuf序列化结果是一串无意义的字节流，无法区分哪里是开始哪里是结束。
 - 为了定位：加上MsgId等信息，帮助匹配一次的RPC请求和响应，不会串包
 - 错误提升：加上错误信息，定位RPC失败的原因
+
+RPC过程：read - decode - dispatche - encode - write
 ## 协议封装  
 ### Tiny ProtoBuf Protocol
 大端存储/小端存储  
@@ -2396,20 +2398,21 @@ service->CallMethod(method, &controller, req_msg, rsp_msg, NULL);
 
 ## 模块封装
 ### RpcDisPatcher  
-RPC服务端流程
-初始化：注册OrderService对象
-1. 从 buffer 读取数据，decode 得到请求的TinyPBProtocol对象。
+1. **从 buffer 读取数据，decode** 得到请求的TinyPBProtocol对象。
 2. 从 TinyPBProtocol 里得到 method_name，从 OrderService 对象里通过 service.method_name 找到方法 func
 3. 找到对应的 request_type 和 response_type
 4. 将请求体里的 pb_data 反序列化为 request_type 的一个对象，声明一个空的 response_type 对象
 5. func(request, response)
 6. 将 response 对象序列化为 pb_data，再塞入到 TinyPBProtocol 结构体中
-7. encode 发送回包
+7. **encode 插入 buffer 发送回包** 
 
 ### RpcController  
 
 ### RpcClosesure  
+
 ### RpcChannel和RpcAsyncChannel  
+流程：connect - encode - write - read - decode
+
 # 项目完善
 日志完善和优化  
 代码生成工具脚手架封装  
@@ -2601,18 +2604,18 @@ void test_client(){
         std::shared_ptr<lrpc::StringProtocol> message = std::make_shared<lrpc::StringProtocol>("12345", "hello lrpc");
         
         client.writeMessage(message, [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
-            DEBUGLOG("client write message success, req_id=[%s]", msg_ptr->req_id_.c_str());
+            DEBUGLOG("client write message success, msg_id=[%s]", msg_ptr->msg_id_.c_str());
         });
 
         client.readMessage("12345", [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
             std::shared_ptr<lrpc::StringProtocol> message = std::dynamic_pointer_cast<lrpc::StringProtocol>(msg_ptr);
-            DEBUGLOG("client read message success, req_id=[%s], msg=[%s]", 
-                message->req_id_.c_str(), message->msg_.c_str()
+            DEBUGLOG("client read message success, msg_id=[%s], msg=[%s]", 
+                message->msg_id_.c_str(), message->msg_.c_str()
             );
         });
 
         client.writeMessage(message, [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
-            DEBUGLOG("client write message success, req_id=[%s]", msg_ptr->req_id_.c_str());
+            DEBUGLOG("client write message success, msg_id=[%s]", msg_ptr->msg_id_.c_str());
         });
     });
 }
