@@ -1,7 +1,12 @@
+#include "lrpc/common/error_code.h"
 #include "lrpc/common/log.h"
 #include "lrpc/net/tcp/tcp_client.h"
 #include "lrpc/net/fd_event.h"
 #include "lrpc/net/fd_event_group.h"
+#include "lrpc/net/tcp/net_addr.h"
+#include <cerrno>
+#include <memory>
+#include <strings.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <string.h>
@@ -33,33 +38,69 @@ TcpClient::~TcpClient(){
 void TcpClient::connect(std::function<void()> callback){
     int rt = ::connect(fd_, peer_addr_->getSockAddr(), peer_addr_->getSockLen());
     if(rt == 0){
+        initLocalAddr();
+        connection_->setState(TcpConnection::Connected);
         DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
+        if(callback){
+            callback();
+        }
     }else if(rt == -1){
         if(errno == EINPROGRESS){
-            // epoll 监听可写
             DEBUGLOG("connect in progress");
 
-            fd_event_->listen(FdEvent::OUT_EVENT, [this, callback]()->void{
-                {}
-                int err = 0;
-                socklen_t len = sizeof(err);
-                getsockopt(fd_, SOL_SOCKET, SO_ERROR, &err, &len);
-                bool is_connected = false;
-                if(err == 0){
-                    DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
-                    connection_->setState(TcpConnection::Connected);
-                    is_connected = true; 
-                } else {
-                    ERRORLOG("connect error, errno=%d, error=%s", err, strerror(errno));
-                }
-                // 连接完成去掉可写事件监听，否则会一直除法
-                DEBUGLOG("去掉可写事件监听");
-                fd_event_->cancel(FdEvent::OUT_EVENT);
-                event_loop_->addEpollEvent(fd_event_);
+            // epoll 监听可写，判断错误码
+            fd_event_->listen(FdEvent::OUT_EVENT, 
+                [this, callback]()->void{
+                    int rt = ::connect(fd_, peer_addr_->getSockAddr(), peer_addr_->getSockLen());
+                    if((rt < 0 && errno == EISCONN) || rt == 0){
+                        DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
+                            initLocalAddr();
+                            connection_->setState(TcpConnection::Connected);
+                            DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
+                    }else{
+                        if(errno == ECONNREFUSED){
+                            connect_error_code_ = ERROR_PEER_CLOSED;
+                            connect_error_info_ = "connect refused, sys error = " + std::string(strerror(errno));
+                        }else{
+                            connect_error_code_ = ERROR_FAILED_CONNECT;
+                            connect_error_info_ = "connect unknown error, sys error = " + std::string(strerror(errno));
+                        }
+                        ERRORLOG("connect error, errno=%d, error=%s", errno, strerror(errno));
 
-                // 连接成功才执行回调
-                if(is_connected && callback) callback();
-            });
+                        close(fd_);
+                        fd_ = socket(peer_addr_->getFamily(), SOCK_STREAM, 0);
+                    }
+
+                    event_loop_->delEpollEvent(fd_event_);
+                    DEBUGLOG("now begin to done");
+                    if(callback){
+                        callback();
+                    }
+                }
+            );
+
+            // fd_event_->listen(FdEvent::OUT_EVENT, [this, callback]()->void{
+            //     {}
+            //     int err = 0;
+            //     socklen_t len = sizeof(err);
+            //     getsockopt(fd_, SOL_SOCKET, SO_ERROR, &err, &len);
+            //     if(err == 0){
+            //         initLocalAddr();
+            //         connection_->setState(TcpConnection::Connected);
+            //         DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
+            //     } else {
+            //         connect_error_code_ = ERROR_FAILED_CONNECT;
+            //         connect_error_info_ = "connect error, sys error = " + std::string(strerror(errno));
+            //         ERRORLOG("connect error, errno=%d, error=%s", err, strerror(errno));
+            //     }
+            //     // 连接完成去掉可写事件监听，否则会一直除法
+            //     DEBUGLOG("去掉可写事件监听");
+            //     fd_event_->cancel(FdEvent::OUT_EVENT);
+            //     event_loop_->addEpollEvent(fd_event_);
+
+            //     // 连接成功才执行回调
+            //     if(callback) callback();
+            // });
             
             event_loop_->addEpollEvent(fd_event_);
             if(!event_loop_->isLooping()) {
@@ -67,7 +108,12 @@ void TcpClient::connect(std::function<void()> callback){
             }
 
         } else {
+            connect_error_code_ = ERROR_FAILED_CONNECT;
+            connect_error_info_ = "connect error, sys error = " + std::string(strerror(errno));
             ERRORLOG("connect error, errno=%d, error=%s", errno, strerror(errno));
+            if(callback){
+                callback();
+            }
             return ;
         }
     }
@@ -91,6 +137,39 @@ void TcpClient::stop(){
     if(event_loop_->isLooping()){
         event_loop_->stop();
     }
+}
+
+int TcpClient::getConnectErrorCode(){
+    return connect_error_code_;
+}
+
+std::string TcpClient::getConnectErrorInfo(){
+    return connect_error_info_;
+}
+
+NetAddr::s_ptr TcpClient::getPeerAddr(){
+    return peer_addr_;
+}
+
+NetAddr::s_ptr TcpClient::getLocalAddr(){
+    return local_addr_;
+}
+
+void TcpClient::initLocalAddr(){
+    sockaddr_in local_addr;
+    bzero(&local_addr, sizeof(local_addr));
+    socklen_t len = sizeof(local_addr);
+    int rt = getsockname(fd_, reinterpret_cast<sockaddr*>(&local_addr), &len);
+    if(rt != 0){
+        ERRORLOG("initLocalAddr error, getsockname errror, errno=%d, error=%s", errno, strerror(errno));
+        return;
+    }
+   
+    local_addr_ = std::make_shared<IPNetAddr>(local_addr);
+}
+
+void TcpClient::addTimerEvent(TimerEvent::s_ptr timer_event){
+    event_loop_->addTimerEvent(timer_event);
 }
 
 } // namespace lrpc

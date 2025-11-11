@@ -7,7 +7,7 @@ namespace lrpc{
 
 #endif
 
-const int ERROR_PEER_CLOSE = SYS_ERROR_PREFIX(0000);            // 对端关闭
+const int ERROR_PEER_CLOSED = SYS_ERROR_PREFIX(0000);            // 对端关闭
 const int ERROR_FAILED_CONNECT = SYS_ERROR_PREFIX(0001);        // 连接失败
 const int ERROR_FAILED_GET_REPLAY = SYS_ERROR_PREFIX(0002);     // 返回值
 const int ERROR_FAILED_DESERIALIZE = SYS_ERROR_PREFIX(0003);    // 反序列化
@@ -18,5 +18,6 @@ const int ERROR_SERVICE_NOT_FOUND = SYS_ERROR_PREFIX(0006);
 const int ERROR_METHOD_NOT_FOUND = SYS_ERROR_PREFIX(0007);
 
 const int ERROR_CHANNEL_INIT = SYS_ERROR_PREFIX(0008);
+const int ERROR_RPC_CALL_TIMEOUT = SYS_ERROR_PREFIX(0009);
 
 } // namespace lrpc

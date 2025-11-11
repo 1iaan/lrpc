@@ -1,6 +1,7 @@
 #include "lrpc/net/eventloop.h"
 #include "lrpc/common/log.h"
 #include "lrpc/common/util.h"
+#include "lrpc/net/fd_event.h"
 #include <cerrno>
 #include <cstddef>
 #include <string.h>
@@ -141,12 +142,21 @@ void EventLoop::loop(){
             if(trigger_event.events & EPOLLIN){
                 DEBUGLOG("fd [%d:%s] trigger EPOLLIN event", fd_event->getFd(), fd_event->getFdName().c_str());
                 addTask(fd_event->handler(FdEvent::IN_EVENT));
-            }else if(trigger_event.events & EPOLLOUT){
+            }
+            if(trigger_event.events & EPOLLOUT){
                 DEBUGLOG("fd [%d:%s] trigger EPOLLOUT event", fd_event->getFd(), fd_event->getFdName().c_str());
                 addTask(fd_event->handler(FdEvent::OUT_EVENT));
             }
+            if(trigger_event.events & EPOLLERR){
+                DEBUGLOG("fd [%d:%s] trigger EPOLLERR event", fd_event->getFd(), fd_event->getFdName().c_str());
+                delEpollEvent(fd_event);
+                if(fd_event->handler(FdEvent::ERROR_EVENT) != nullptr){
+                    addTask(fd_event->handler(FdEvent::OUT_EVENT));
+                }
+            }
 
         }
+        DEBUGLOG("epoll loop rt %d", rt);
     }
 
     DEBUGLOG("eventloop [%d] stop", tid_);

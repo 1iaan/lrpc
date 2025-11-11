@@ -6,9 +6,11 @@
 #include "lrpc/common/msg_id_util.h"
 #include "lrpc/net/rpc/rpc_controller.h"
 #include "lrpc/net/tcp/tcp_client.h"
+#include "lrpc/net/timer_event.h"
 #include <google/protobuf/message.h>
 #include <cstddef>
 #include <memory>
+#include <string>
 
 namespace lrpc {
 RpcChannel::RpcChannel(NetAddr::s_ptr peer_addr): peer_addr_(peer_addr){
@@ -56,15 +58,43 @@ void RpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
     }
 
     s_ptr channel = shared_from_this();
+
+    timer_event_ = std::make_shared<TimerEvent>(m_controller->getTimeOut(), false, [m_controller, channel]() mutable->void{
+        m_controller->StartCancel();
+        m_controller->setError(ERROR_FAILED_SERIALIZE, "rpc call timeout " + std::to_string(m_controller->getTimeOut()));
     
-    client_->connect([this, req_protocol, channel]()->void{
-        client_->writeMessage(req_protocol, [this, req_protocol, channel](AbstractProtocol::s_ptr)->void{
-            INFOLOG("%s | send request success, callmethod name[%s], origin request[%s]", 
-                req_protocol->msg_id_.c_str(), req_protocol->method_name_.c_str(), channel->getRequest()->ShortDebugString().c_str());
+        if(channel->getClosure()){
+            channel->getClosure()->Run();
+        }
+        channel.reset();
+        
+    });
+
+    client_->addTimerEvent(timer_event_);
+    
+    client_->connect([req_protocol, channel]()->void{
+
+        RpcController* m_controller =  dynamic_cast<RpcController*>(channel->getController());
+
+        if(channel->getTcpClient()->getConnectErrorCode() != 0) {
+            ERRORLOG("%s | connect error, error code[%d], error info[%s], peer addr[%s]", 
+                req_protocol->msg_id_.c_str(), channel->getTcpClient()->getConnectErrorCode(), 
+                channel->getTcpClient()->getConnectErrorInfo().c_str(), channel->getTcpClient()->getPeerAddr()->toString().c_str());
+            m_controller->setError(channel->getTcpClient()->getConnectErrorCode(), channel->getTcpClient()->getConnectErrorInfo());
+            return;
+        }
+
+        channel->getTcpClient()->writeMessage(req_protocol, [req_protocol, channel](AbstractProtocol::s_ptr)->void{
+            INFOLOG("%s | send request success, callmethod name[%s], origin request[%s], local_addr_[%s]", 
+                req_protocol->msg_id_.c_str(), req_protocol->method_name_.c_str(), channel->getRequest()->ShortDebugString().c_str(),
+                channel->getTcpClient()->getLocalAddr()->toString().c_str());
             
-            client_->readMessage(req_protocol->msg_id_, [channel](AbstractProtocol::s_ptr msg) mutable ->void{
+            channel->getTcpClient()->readMessage(req_protocol->msg_id_, [channel](AbstractProtocol::s_ptr msg) mutable ->void{
                 std::shared_ptr<TinyPBProtocol> rsp_protocol = std::dynamic_pointer_cast<TinyPBProtocol>(msg);
                 
+                // 取消定时任务
+                channel->getTimerEvent()->setCanceled(true);
+
                 RpcController* m_controller =  dynamic_cast<RpcController*>(channel->getController());
                 if(!channel->getResponse()->ParseFromString(rsp_protocol->pb_data_)){
                     ERRORLOG("serialize error");
@@ -81,7 +111,7 @@ void RpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
                     m_controller->setError(rsp_protocol->err_code_, rsp_protocol->err_info_);
                 }
 
-                if(channel && channel->closure_){
+                if(!channel->getController()->IsCanceled() && channel->closure_){
                     channel->closure_->Run();
                 }
 

@@ -12,6 +12,7 @@ public:
     enum TriggerEvent {
         IN_EVENT = EPOLLIN,
         OUT_EVENT = EPOLLOUT,
+        ERROR_EVENT = EPOLLERR,
     };
 
     FdEvent();
@@ -34,12 +35,14 @@ public:
 
     epoll_event getEpollEvent() { return listen_events_; }
 
+    
 private:
     int fd_{-1};
     std::string fd_name_;
     epoll_event listen_events_;
-    std::function<void()> read_callback_;
-    std::function<void()> write_callback_;
+    std::function<void()> read_callback_{nullptr};
+    std::function<void()> write_callback_{nullptr};
+    std::function<void()> error_callback_{nullptr};
 
 public:
 

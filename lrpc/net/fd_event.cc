@@ -44,6 +44,9 @@ std::function<void()> FdEvent::handler(TriggerEvent ev_t){
         case FdEvent::OUT_EVENT:{
             return write_callback_;            
         }
+        case FdEvent::ERROR_EVENT:{
+            return error_callback_;
+        }
         default:
         break;
     }
@@ -60,6 +63,11 @@ void FdEvent::listen(TriggerEvent ev_t, std::function<void()> callback){
             listen_events_.events |= EPOLLOUT;
             write_callback_ = callback;       
             break; 
+        }
+        case FdEvent::ERROR_EVENT:{
+            listen_events_.events |= EPOLLERR;
+            error_callback_ = callback;
+            break;
         }
         default:
         break;

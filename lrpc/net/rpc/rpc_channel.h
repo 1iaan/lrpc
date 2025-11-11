@@ -2,11 +2,28 @@
 
 #include "lrpc/net/tcp/net_addr.h"
 #include "lrpc/net/tcp/tcp_client.h"
+#include "lrpc/net/timer_event.h"
 #include <google/protobuf/message.h>
 #include <google/protobuf/service.h>
 #include <google/protobuf/stubs/callback.h>
 #include <memory>
 namespace lrpc {
+
+#define NEWMESSAGE(type, var_name) \
+    std::shared_ptr<type> var_name = std::make_shared<type>();   \
+
+#define NEWRPCCONTROLLER(var_name) \
+    std::shared_ptr<lrpc::RpcController> var_name = std::make_shared<lrpc::RpcController>();  \
+
+#define NEWRPCCHANNEL(addr, var_name) \
+    std::shared_ptr<lrpc::RpcChannel> var_name = std::make_shared<lrpc::RpcChannel>(std::make_shared<lrpc::IPNetAddr>(addr));  \
+
+#define CALLRPC(channel, method_name, controller, request, response, closure) \
+    {   \
+        channel->init(controller, request, response, closure);  \
+        OrderService_Stub stub(channel.get());      \
+        stub.method_name(controller.get(), request.get(), response.get(), closure.get());    \
+    }   \
 
 class RpcChannel : public google::protobuf::RpcChannel, public std::enable_shared_from_this<RpcChannel>{
 public:
@@ -31,6 +48,7 @@ public:
     google::protobuf::Closure* getClosure(){ return closure_.get(); }
 
     TcpClient* getTcpClient(){ return client_.get(); }
+    TimerEvent* getTimerEvent(){ return timer_event_.get(); }
 
 private:
     NetAddr::s_ptr local_addr_{nullptr};
@@ -44,6 +62,7 @@ private:
     bool is_init_{false};
 
     TcpClient::s_ptr client_{nullptr};
+    TimerEvent::s_ptr timer_event_{nullptr};
 };
 
 } // namespace lrpc
