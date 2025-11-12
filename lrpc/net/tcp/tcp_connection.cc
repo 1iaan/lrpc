@@ -66,6 +66,7 @@ void TcpConnection::onRead(){
 
         int rt = read(fd_, &in_buffer->buffer_[write_index], read_size);
         DEBUGLOG("success read %d byte from addr[%s], clientfd[%d]", rt, peer_addr_->toString().c_str(), fd_);
+        DEBUGLOG("read rt = %d", rt);
         if(rt > 0){
             in_buffer->moveWriteIndex(rt);
             // 如果本次读取数据和writeable相同， 可能还有没读的， 继续读
@@ -75,12 +76,16 @@ void TcpConnection::onRead(){
                 is_read_all = true;
                 break;
             }
+        // rt == 0 说明读到 EOF 对端关闭连接（EOF）
         }else if(rt == 0){
             is_closed = true; 
             break;
         // 非阻塞读到没有可读会报错 EAGAIN
         }else if(rt == -1 && errno == EAGAIN){
             is_read_all = true;
+            break;
+        }else if(rt < 0){
+            is_closed = true; 
             break;
         }
     }
@@ -113,11 +118,13 @@ void TcpConnection::execute(){
         // in_buffer->readFromBuf(tmp, size);
         std::vector<AbstractProtocol::s_ptr> result;
         std::vector<AbstractProtocol::s_ptr> response_messages;
+        DEBUGLOG("decode buffer to protocol");
         coder_->decode(result, in_buffer);
+        DEBUGLOG("decode complete");
         for(size_t i = 0;i < result.size(); ++ i){
             // 1. 针对每个请求调用rpc方法响应message
             // 2. 将message放入发送缓冲区监听可写事件
-            INFOLOG("success get request[%s] fomr client[%s]", result[i]->msg_id_.c_str(), peer_addr_->toString().c_str());
+            INFOLOG("[TcpConnection] success get request[%s] fomr client[%s]", result[i]->msg_id_.c_str(), peer_addr_->toString().c_str());
             TinyPBProtocol::s_ptr message = std::make_shared<TinyPBProtocol>();
             // message->pb_data_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->pb_data_;
             // message->method_name_ = (std::dynamic_pointer_cast<TinyPBProtocol>(result[i]))->method_name_;
@@ -127,7 +134,9 @@ void TcpConnection::execute(){
             response_messages.push_back(message);
         }
 
+        DEBUGLOG("encode protocol to buffer");
         coder_->encode(response_messages, out_buffer);
+        DEBUGLOG("encode complete");
         listenWrite();
     }
     // 客户端逻辑，对端是服务端

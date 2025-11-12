@@ -3,6 +3,7 @@
 #include "lrpc/net/fd_event.h"
 #include "lrpc/common/mutex.h"
 #include "lrpc/net/timer.h"
+#include "lrpc/net/wakeup_fd_event.h"
 #include "timer_event.h"
 #include <queue>
 #include <sched.h>

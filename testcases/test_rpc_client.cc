@@ -59,23 +59,14 @@ void test_client(){
     });
 }
 
-void test_channel(){
-    // lrpc::IPNetAddr::s_ptr addr = std::make_shared<lrpc::IPNetAddr>("127.0.0.1", 12345);
-    // std::shared_ptr<lrpc::RpcChannel> channel = std::make_shared<lrpc::RpcChannel>(addr);
-    NEWRPCCHANNEL("127.0.0.1:12345", channel);
-
-
-    // std::shared_ptr<makeOrderRequest> request = std::make_shared<makeOrderRequest>();
-    // std::shared_ptr<makeOrderResponse> response = std::make_shared<makeOrderResponse>();
+void makeOrder(lrpc::RpcChannel::s_ptr channel){
     NEWMESSAGE(makeOrderRequest, request);
     NEWMESSAGE(makeOrderResponse, response);
     request->set_price(100);
     request->set_goods("computer");
 
-
-    // std::shared_ptr<lrpc::RpcController> controller = std::make_shared<lrpc::RpcController>();
     NEWRPCCONTROLLER(controller);
-    controller->setMsgId("1688");
+    controller->setMsgId("1");
     controller->setTimeOut(10000);
 
     std::shared_ptr<lrpc::RpcClousre> closure = std::make_shared<lrpc::RpcClousre>([request, response, channel, controller]() mutable ->void{
@@ -86,28 +77,77 @@ void test_channel(){
                 controller->getErrorCode(), 
                 controller->getErrorInfo().c_str()
             );
-            
+            channel->getTcpClient()->stop();
+            channel.reset();
         }else{
             INFOLOG("[%s] | call rpc success, req[%s], res[%s]", 
                 controller->getMsgId().c_str(),
                 request->ShortDebugString().c_str(), response->ShortDebugString().c_str());
             // 业务逻辑
         }
-        channel->getTcpClient()->stop();
-        channel.reset();
     });
+
+    CALLRPC(channel, make_order, controller, request, response, closure);
+}
+
+void queryOrder(lrpc::RpcChannel::s_ptr channel){
+    NEWMESSAGE(queryOrderRequest, request);
+    NEWMESSAGE(queryOrderResponse, response);
+    request->set_order_id("1999");
+
+    NEWRPCCONTROLLER(controller);
+    controller->setMsgId("2");
+    controller->setTimeOut(10000);
+
+    std::shared_ptr<lrpc::RpcClousre> closure = std::make_shared<lrpc::RpcClousre>([request, response, channel, controller]() mutable ->void{
+        if(controller->getErrorCode() != 0){
+            ERRORLOG("[%s] | call rpc failed, req[%s], error code[%d], error info[%s]",
+                controller->getMsgId().c_str(),
+                request->ShortDebugString().c_str(), 
+                controller->getErrorCode(), 
+                controller->getErrorInfo().c_str()
+            );
+            channel->getTcpClient()->stop();
+            channel.reset();
+        }else{
+            INFOLOG("[%s] | call rpc success, req[%s], res[%s]", 
+                controller->getMsgId().c_str(),
+                request->ShortDebugString().c_str(), response->ShortDebugString().c_str());
+            // 业务逻辑
+        }
+
+    });
+
+    CALLRPC(channel, query_order, controller, request, response, closure);
+}
+
+void test_channel(){
+    // lrpc::IPNetAddr::s_ptr addr = std::make_shared<lrpc::IPNetAddr>("127.0.0.1", 12345);
+    // std::shared_ptr<lrpc::RpcChannel> channel = std::make_shared<lrpc::RpcChannel>(addr);
+    NEWRPCCHANNEL("127.0.0.1:12345", channel);
+
+    // std::shared_ptr<makeOrderRequest> request = std::make_shared<makeOrderRequest>();
+    // std::shared_ptr<makeOrderResponse> response = std::make_shared<makeOrderResponse>();
+
+    // std::shared_ptr<lrpc::RpcController> controller = std::make_shared<lrpc::RpcController>();
 
     // channel->init(controller, request, response, closure);
     // OrderService_Stub stub(channel.get());
     // stub.make_order(controller.get(), request.get(), response.get(), closure.get());
-    CALLRPC(channel, make_order, controller, request, response, closure);
+
+    makeOrder(channel);
+
+    queryOrder(channel);
+    
+    channel->getTcpClient()->join();
+    channel->getTcpClient()->stop();
+    channel.reset();
 }
 
 int main(){
     lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
     lrpc::Logger::SetGlobalLogger();
 
-    // test_connect();
     // test_client();
     test_channel();
 

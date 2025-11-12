@@ -85,54 +85,29 @@ tinyxml 2.6.2
 ```
 
 # Config
-用xml读取配置文件。  
-## config.h
-```c++
-class Config{
-public:
-    Config(const char* xmlfile);
+用tinyxml读取配置文件。  
 
-public:
-    static void SetGlobalConfig(const char* xmlfile);
-    static Config* GetGlobalConfig();
-
-public:
-    std::string log_level_;
-};
-```
 ## xml读取宏
 ##代表拼接成一个的变量声明  
 #代表转字符串
-```c++
-TiXmlElement *root_node = xml_document->FirstChildElement("root");
-if (!root_node) {
-  printf("Start lrpc server error, failed to read node [%s]\n", "root");
-  exit(0);
-}
 
-TiXmlElement *log_level_node = log_node->FirstChildElement("log_level");
-if (!log_level_node || !log_level_node->GetText()) {
-  printf("Start lrpc server error, failed to read node [%s]\n", "log_level");
-}
-std ::string log_level = std ::string(log_level_node->GetText());
-```
 ```c++
 #define READ_XML_NODE(name, parent)                                             \
-    TiXmlElement* name#_node = parent->FirstChildElement(#name);               \
-    if(!name#_node){                                                           \
+    TiXmlElement* name##_node = parent->FirstChildElement(#name);               \
+    if(!name##_node){                                                           \
         printf("Start lrpc server error, failed to read node [%s]\n", #name);   \
         exit(0);                                                                \
     }                                                                           \
 
 #define READ_STR_FROM_XML_NODE(name, parent)                                    \
-    TiXmlElement* name#_node = parent->FirstChildElement(#name);               \
-    if(!name#_node || !name#_node->GetText()) {                               \
+    TiXmlElement* name##_node = parent->FirstChildElement(#name);               \
+    if(!name##_node || !name##_node->GetText()) {                               \
         printf("Start lrpc server error, failed to read node [%s]\n", #name);   \
     }                                                                           \
-    std::string name = std::string(name#_node->GetText());                     \
-`
+    std::string name = std::string(name##_node->GetText());                     \
 ```
 ## config.cc
+声明一个全局变量用来在初始化时读取配置文件。
 ```c++
 static Config* g_config = NULL;
 void Config::SetGlobalConfig(const char* xmlfile){
@@ -159,7 +134,7 @@ Config::Config(const char* xmlfile){
 
     READ_STR_FROM_XML_NODE(log_level, log_node);
 
-    log_level_ = log_level;
+    this->log_level_ = log_level;
     
     printf("Config: \n");
     printf("\tlog_level:\t[%s]\n", log_level_.c_str());
@@ -169,13 +144,35 @@ Config::Config(const char* xmlfile){
 # Mutex
 对 POSIX  API 做一下封装  
 这里直接用C++ mutex 也可以，内部实现是差不多的  
-## mutex.h
+## Mutex
+对pthread_mutex的封装
 ```c++
-/**
- * @brief 
- * RAII锁
- * @tparam T 
- */
+class Mutex{
+public: 
+    Mutex() {
+        pthread_mutex_init(&mutex_, NULL);
+    }
+
+    ~Mutex(){
+        pthread_mutex_destroy(&mutex_);
+    }
+
+    void lock(){
+        pthread_mutex_lock(&mutex_);
+    }
+
+    void unlock(){
+        pthread_mutex_unlock(&mutex_);
+    }
+
+private:
+    pthread_mutex_t mutex_;
+};
+```
+
+## ScopeMutex
+RAII锁
+```c++
 template<class T>
 class ScopeMutex{
 public:
@@ -204,64 +201,6 @@ private:
     T& mutex_;
     bool is_lock_ {false};
 };
-
-/**
- * @brief 封装pthread锁，类似std::mutex
- * 
- */
-class Mutex{
-public: 
-    Mutex() {
-        pthread_mutex_init(&mutex_, NULL);
-    }
-
-    ~Mutex(){
-        pthread_mutex_destroy(&mutex_);
-    }
-
-    void lock(){
-        pthread_mutex_lock(&mutex_);
-    }
-
-    void unlock(){
-        pthread_mutex_unlock(&mutex_);
-    }
-
-private:
-    pthread_mutex_t mutex_;
-};
-
-}
-```
-
-## 参考
-```c++
-// 构造函数被调用   lock_guard 会自动锁定
-// 析构函数被调用   lock_guard 会自动解锁
-template<typename _Mutex>  // 模板类型，希望传递进来的类型是有 lock和unlock方法的锁
-class lock_guard
-{
-public:
-    typedef _Mutex mutex_type;
-
-    // 构造，加锁  explicit 禁止隐式推导
-    explicit lock_guard(mutex_type& __m) : _M_device(__m)
-    { _M_device.lock(); }
-
-    // std::adopt lock
-    lock_guard(mutex_type& __m, adopt_lock_t) noexcept : _M_device(__m)
-    { } // calling thread owns mutex
-
-    // 析构，解锁
-    ~lock_guard()
-    { _M_device.unlock(); }
-
-    lock_guard(const lock_guard&) = delete;
-    lock_guard& operator=(const lock_guard&) = delete;
-
-private:
-    mutex_type&  _M_device;
-};
 ```
 
 # Logger
@@ -275,57 +214,8 @@ private:
 日志格式
 `[Level][%y-%m-%d %H:%M:%s.%ms]\t[pid:thread_id]\t[file_name:line][%msg]`   
 
-## log.cc
-```c++
-enum class LogLevel{
-    Unknown = 0,
-    Debug = 1, 
-    Info = 2,
-    Error = 3,
-};
-
-std::string LogLevelToString(LogLevel level);
-LogLevel StringToLogLevel(const std::string& log_level);
-
-class LogEvent {
-public:
-    LogEvent(LogLevel level): log_level_(level){}
-
-public:
-    std::string getFileName() const { return filename_; }
-    LogLevel getLogLevel() const { return log_level_; }
-    std::string toString();
-
-private:
-    std::string filename_;      // 文件名
-    std::string fileline_;      // 行号
-    int pid_;                   // 进程号
-    int tid_;                   // 线程号
-    std::string ctime_;         // 时间
-    LogLevel log_level_;        // 日志级别
-
-};
-
-class Logger{
-public:
-    // typedef std::shared_ptr<Logger> s_ptr;
-    Logger(LogLevel level): log_level_(level){}
-
-public:
-    static Logger* GetGlobalLogger();
-    static void SetGlobalLogger();
-    void pushLog(const std::string &msg);
-    void log();
-    LogLevel getLogLevel() { return log_level_; }
-
-private:
-    LogLevel log_level_;
-    std::queue<std::string> buffer_;
-    Mutex mutex_;
-};
-```
 ## formatString
- 实现 `“printf 风格字符串拼接到 std::string”` 的功能，如 `printf("%s, %d", "str", 11);` 等。
+实现 `“printf 风格字符串拼接到 std::string”` 的功能，如 `printf("%s, %d", "str", 11);` 等。
  
 ```c++
 template<typename... Args>
@@ -347,29 +237,16 @@ msg = LogEvent([level][time][pid:tid]) + [文件名:行号] + formatString(msg);
 
 最后push到全局的logger的队列中  
 
-__FILE__ const char *   
+- __FILE__const char *   文件名
+- __LINE__int            行号
+- `set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.")` 设置文件路径
+- ... 是宏参数占位符    
+- __VA_ARGS__是预定义宏名，用于展开所有传入的可变参数    
+- 当宏参数为空时，##__VA_ARGS__会自动去掉前一个逗号  
 
-__LINE__ int   
-
-... 是宏参数占位符    
-
-__VA_ARGS__ 是预定义宏名，用于展开所有传入的可变参数    
-
- 当宏参数为空时，##__VA_ARGS__ 会自动去掉前一个逗号  
-
+必须在宏定义中写__FILE__和__LINE__因为写在函数中的这两个参数会固定是函数的位置，宏定义展开会在调用的位置。
 ```c++
 // 如全局日志等级为 INFO, 那么打印 INFO, ERROR, 忽略 INFO > DEBUG
-if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Debug) {
-    // msg = LogEvent([level][time][pid:tid]) + [文件名:行号] + formatString(msg);
-    std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Debug))->toString() 
-        + "[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]\t" 
-        + lrpc::formatString(str, #__VA_ARGS__) + "\n"; 
-    lrpc::Logger::GetGlobalLogger()->pushLog(msg);
-    lrpc::Logger::  GetGlobalLogger()->log();
-}
-```
-```c++
-
 #define DEBUGLOG(str, ...)\
     if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Debug) {\
         char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
@@ -378,69 +255,16 @@ if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Debug) {
         lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
         lrpc::Logger::  GetGlobalLogger()->log();\
     }\
-
-#define INFOLOG(str, ...)\
-    if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Info) {\
-        char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
-        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Info))->toString() + _locBuf  \
-        + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
-        lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
-        lrpc::Logger::  GetGlobalLogger()->log();\
-    }\
-
-#define ERRORLOG(str, ...)\
-    if(lrpc::Logger::GetGlobalLogger()->getLogLevel() <= lrpc::LogLevel::Error) {\
-        char _locBuf[64]; snprintf(_locBuf, sizeof(_locBuf), "%-40s", ("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "]").c_str()); \
-        std::string msg = (new lrpc::LogEvent(lrpc::LogLevel::Error))->toString() + _locBuf  \
-        + lrpc::formatString(str, ##__VA_ARGS__) + "\n"; \
-        lrpc::Logger::GetGlobalLogger()->pushLog(msg);\
-        lrpc::Logger::  GetGlobalLogger()->log();\
-    }\
 ```
+
 ## log.cc
+时间库的用法
+- gettimeofday  获取当前时间戳(秒+微秒)
+- localtime_r   将时间戳(秒)转换为本地时间的timestamp
+- strftime      将timestamp结构转换为格式化字符串"y-m-d  H:M:S"
+
+注意操作队列的时候加锁
 ```c++
-static Logger* g_logger = nullptr;
-
-void Logger::SetGlobalLogger(){
-    if(!g_logger){
-        printf("Init Logger module\n");
-        LogLevel level = StringToLogLevel( Config::GetGlobalConfig()->log_level_);
-        g_logger = new Logger(level);
-    }
-}
-
-Logger* Logger::GetGlobalLogger(){
-    return g_logger;
-}
-
-std::string LogLevelToString(LogLevel level){
-    switch (level) {
-        case LogLevel::Debug: {
-            return "DEBUG";
-        }
-        case LogLevel::Info: {
-            return "INFO";
-        }
-        case LogLevel::Error: {
-            return "ERROR";
-        }
-        default:
-            return "UNKNOWN";
-    }
-}
-
-LogLevel StringToLogLevel(const std::string& log_level) {
-  if (log_level == "DEBUG") {
-    return LogLevel::Debug;
-  } else if (log_level == "INFO") {
-    return LogLevel::Info;
-  } else if (log_level == "ERROR") {
-    return LogLevel::Error;
-  } else {
-    return LogLevel::Unknown;
-  }
-}
-
 std::string LogEvent::toString(){
     struct timeval now_time;
     gettimeofday(&now_time, nullptr);
@@ -452,7 +276,7 @@ std::string LogEvent::toString(){
     strftime(&buf[0], 128, "%y-%m-%d %H:%M:%S", &now_time_t);
     
     ctime_ = buf;
-    int ms = now_time.tv_usec * 1000;
+    int ms = now_time.tv_usec / 1000;
     ctime_ = ctime_ + "." + std::to_string(ms);
 
     pid_ = get_process_id();
@@ -465,29 +289,9 @@ std::string LogEvent::toString(){
 
     return ss.str();
 }
-
-void Logger::pushLog(const std::string &msg){
-    ScopeMutex<Mutex> lock(mutex_);
-    buffer_.push(msg);
-}
-
-void Logger::log(){
-    ScopeMutex<Mutex> lock(mutex_);
-    while (!buffer_.empty()) {
-        std::string msg = buffer_.front();
-        buffer_.pop();
-
-        printf("%s", msg.c_str());
-    }
-}
 ```
 
 # Reactor(EventLoop)
-EventLoop 即 Reactor架构的核心逻辑。  
-
-实现定时器。  
-
-IO线程封装。  
 ## Reactor 模型概念
 Reactor 模式是一种事件驱动的设计模式，  
 让一个或多个线程负责：  
@@ -496,145 +300,127 @@ Reactor 模式是一种事件驱动的设计模式，
 让一个或多个线程负责：
 1. 执行任务
 
-目前的实现是负责Reactor的线程也负责执行，也就是单个线程同时负责等待、分发、执行。
+目前的实现是：一个Reactor作为Acceptor，n个Reactor作为I/O线程处理读写并兼职Worker线程(执行业务逻辑)
+
+有多种实现：
+1. 单Reactor 单线程
+    - 所有I/O和逻辑业务都由一个线程执行
+2. 单Reactor 多线程
+    - Reactor+Worker线程
+    - 一个主Reactor管理所有的连接，业务逻辑交给线程池
+3. 多Reactor 单线程
+    - 主从Reactor 模式 [n:1线程模型]
+    - 主 Reactor 只接受连接，从 Reactor 处理 I/O；
+4. 多Reactor 多线程
+    - 主从Reactor 模式 [n:m线程模型]
+    - 主 Reactor 只接受连接，从 Reactor 处理 I/O， Worker 池执行业务。
 
 ## FdEvent
 作用：把callback、fd与epoll事件绑定起来。
 
-1. listen: 给fd绑定回调。
-2. handler： 返回fd对应的回调。
+方法：
+1. listen:  给fd绑定回调。
+2. handler：返回fd对应的回调。
 3. getEpollEvent: 返回fd上绑定的事件。
+变量:
+1. int fd_{-1};
+2. epoll_event listen_events_;
+3. std::string fd_name_;
+4. std::function<void()> read_callback_;
+5. std::function<void()> write_callback_;
+6. std::function<void()> error_callback_;
 
-
-
-### fd_event.h
+注意 epoll_event 的结构如下：
 ```c++
-enum TriggerEvent {
-    IN_EVENT = EPOLLIN,
-    OUT_EVENT = EPOLLOUT,
-};
+typedef union epoll_data
+{
+  void *ptr;    // 可以指向FdEvent
+  int fd;
+  uint32_t u32;
+  uint64_t u64;
+} epoll_data_t;
 
-class FdEvent{
-public:
-
-    FdEvent(int fd);
-    FdEvent(int fd, std::string fd_name);
-    
-    ~FdEvent();
-
-    std::function<void()> handler(TriggerEvent ev_t);
-
-    void listen(TriggerEvent ev_t, std::function<void()> callback);
-
-    int getFd() const { return fd_; }
-    std::string getFdName() { return fd_name_; }
-
-    epoll_event getEpollEvent() { return listen_events_; }
-
-private:
-    int fd_{-1};
-    std::string fd_name_;
-    epoll_event listen_events_;
-    std::function<void()> read_callback_;
-    std::function<void()> write_callback_;
-};
-
+struct epoll_event
+{
+  uint32_t events;	/* Epoll events */
+  epoll_data_t data;	/* User data variable */
+} __EPOLL_PACKED;
 ```
-
-### fd_event.cc
-```c++
-FdEvent::FdEvent(int fd): fd_(fd){
-    fd_name_ = "fd_" + std::to_string(fd);
-    memset(&listen_events_, 0, sizeof(listen_events_));
-    listen_events_.data.ptr = this;
-}
-
-
-FdEvent::FdEvent(int fd, std::string fd_name): fd_(fd), fd_name_(fd_name){
-    memset(&listen_events_, 0, sizeof(listen_events_));
-    listen_events_.data.ptr = this;
-}
-
-FdEvent::~FdEvent(){
-
-}
-
-std::function<void()> FdEvent::handler(TriggerEvent ev_t){
-    switch (ev_t) {
-        case TriggerEvent::IN_EVENT:{
-            return read_callback_;
-        }
-        case TriggerEvent::OUT_EVENT:{
-            return write_callback_;            
-        }
-        default:
-        break;
-    }
-}
-
-void FdEvent::listen(TriggerEvent ev_t, std::function<void()> callback){
-    switch (ev_t) {
-        case TriggerEvent::IN_EVENT:{
-            listen_events_.events |= EPOLLIN;
-            read_callback_ = callback;
-            break;
-        }
-        case TriggerEvent::OUT_EVENT:{
-            listen_events_.events |= EPOLLOUT;
-            write_callback_ = callback;       
-            break; 
-        }
-        default:
-        break;
-    }
-}
-
-
-```
+data.ptr 可以用来在监听事件触发后，获取该event所属的FdEvent，从而通过handler获取回调函数。
 
 ## WakeUpFdEvent
+继承 FdEvent
+
 作用：将主线程从EPOLL_WAIT中唤醒。
 1. 其他线程添加EpollEvent。
 2. 定时器到时间。
 
 EventLoop初始化的时候定义了该对象, 并且监听EPOLLIN, 定义回调函数为消费这些数据。
 
-其wakeup方法会向wakeup_fd_event_写入数据, 从而唤醒epoll_wait。  
-可以是其他线程AddTask调用，也可以是定时器调用。
-
+其wakeup方法会向 wakeup_fd_event_ 写入数据, 从而唤醒epoll_wait。  
+`int rt = write(fd_, &one, sizeof(one));` 
+可以是其他线程AddTask调用，也可以是定时器调用。  
 感觉没有必要抽象出一个类呢。但为了单独说明其重要性还是抽象出来。
+
+## TimerEvent
+一个定时器事件的封装, 包含：
+- arrive_time_ 触发时间 **注意下一次触发的事件是原本应该触发的事件(arrive_time_)+internal_，而不是now+internal_
+- internal_ 间隔
+- is_canceled 是否取消
+- is_repeated_ 是否重复
+- task_  回调
+
+## Timer
+继承 FdEvent
+
+定时器完成心跳检测？  
+定时器事件封装, 除了下面的实现我觉得也可以控制往WakeUpFd写入数据来触发epoll_wait, 性能未知。
+
+Timer 最重要的是 `timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC)` 创建一个fd  
+和 `timerfd_settime(getFd(), 0, &value, NULL)` 让内核在timespec规定的事件触发一次EPOLLIN   
+所以需要 `listen(IN_EVENT, bind(onTimer))`
+通过 multimap 存储定时事件  
+
+onTimer:
+1. 读取缓冲区数据(无意义)
+2. 加锁
+3. 备份所有到期的定时任务(tmps)和回调(tasks)
+4. 释放 multimap 里到期的任务
+5. 解锁
+6. 如果是重复任务，重新设置事件，并添加回 multimap
+7. 重新设置下一次timerfd的epollin触发时间(resetArriveTime)
+7. 执行tasks
+
+注意添加和删除都需要加锁，如果新增的定时器事件早于最早的任务需要resetArriveTime
+
+resetArriveTime:
+1. 加锁
+2. 如果第一个任务还没到期，设置下一次唤醒间隔为 `internal = getArriveTime()-now()`
+3. 如果到期，设置下一个唤醒时间为 `internal = 10`ms(立刻)
 ```c++
-class WakeUpFdEvent : public FdEvent{
-public:
-    WakeUpFdEvent(int fd);
+    // s -> ms -> us -> ns
+    timespec ts;
+    bzero(&ts, sizeof(ts));
+    ts.tv_sec = internal / 1000;
+    ts.tv_nsec = (internal % 1000) * 1000000;
 
-    ~WakeUpFdEvent();
-
-public:
-    void wakeup();
-};
-
-WakeUpFdEvent::WakeUpFdEvent(int fd) : FdEvent(fd, "WAKEUP"){
-
-}
-
-// 作用：在其他线程添加EpollEvent的时候，将主线程从EPOLL_WAIT中唤醒。
-void WakeUpFdEvent::wakeup(){
-    uint64_t one = 1;
-    int rt = write(fd_, &one, sizeof(one));
-    if(rt != 8){
-        ERRORLOG("write to wakeup fd less than 8 bytes, fd[%d]", fd_);
-    }
-}
+    itimerspec value;
+    bzero(&value, sizeof(value));
+    value.it_value = ts;
 ```
+4. 告诉内核什么时候唤醒 `int rt = timerfd_settime(getFd(), 0, &value, NULL);` 
+
+
+在eventloop中添加定时器后, 定时器会周期性的timerfd_settime让内核通知epoll有写入事件, 随后会调用这里的ontimer回调执行定时任务, ontimer中会再次设置timerfd_settime。
 
 ## EventLoop
-eventloop
+### eventloop主循环
 ```c++
 while (!stop_) {
     执行 tasks_ 里的任务（来自其他线程）
     epoll_wait() 等待事件
-    针对对应的事件，调用 addTask 把其对应的回调加入到 tasks_ 中 
+    遍历返回的result_event事件组，通过data.ptr得到FdEvent获取其回调
+    调用 addTask 把事件对应的回调加入到 tasks_ 中 
 }
 ```
 addEpollEvent 注册事件
@@ -654,78 +440,10 @@ if(是本线程){
 }
 ```
 
-### eventloop.h
-```c++
-class EventLoop{
-public:
-    EventLoop();
-    
-    ~EventLoop();
-
-public:
-    void loop();
-    
-    void wakeup();
-
-    void stop();
-
-    // 如果是主线程执行就直接执行，不是主线程就丢进tasks_里等待主线程执行。
-    void addEpollEvent(FdEvent* event);
-
-    // 如果是主线程执行就直接执行，不是主线程就丢进tasks_里等待主线程执行。
-    void delEpollEvent(FdEvent* event);
-
-    bool isInLoopThread();
-
-    void addTask(std::function<void()> callback, bool is_wake_up = false);
-
-private:
-    pid_t tid_{0};
-
-    int epoll_fd_{0};
-
-    // 用来唤醒 epoll_wait
-    int wakeup_fd_{0};
-
-    WakeUpFdEvent *wakeup_fd_event_{NULL};
-
-    bool stop_{false};
-
-    std::set<int> listen_fds_;
-
-    std::queue<std::function<void()>> tasks_;
-
-    Mutex mutex_;
-
-private:
-    void dealWakeup();
-
-    void initWakeUpFdEvent();
-};
-```
-
 ### 添加EPOLL事件宏
-如果存在于正在监听的fd中，op为MOD，否则为ADD  
-添加的是封装的FdEvent的fd与event, 尽管event中有fd和ptr但这里还是不省那点内存  
+如果存在于正在监听的fd中，op为MOD，否则为ADD   
 将event.fd添加到正在监听的fd中
-```c++                                                      
-    auto it = listen_fds_.find(event->getFd());
-    int op = EPOLL_CTL_ADD;
-    if (it != listen_fds_.end()) {
-    op = EPOLL_CTL_MOD;
-    }
-    epoll_event tmp = event->getEpollEvent();
-    int rt = epoll_ctl(epoll_fd_, op, event->getFd(), &tmp); 
-    if (rt == -1) {
-    ERRORLOG("faild epoll_ctl when add fd [%d:%s], errno=%d, errno=%s",
-                event->getFd(), event->getFdName().c_str(), errno,
-                strerror(errno));
-    } else {
-    listen_fds_.insert(event->getFd()); 
-    }
-    DEBUGLOG("add event success, fd [%d:%s], event [%d]", event->getFd(),
-            event->getFdName().c_str(), tmp);
-```
+`epoll_ctl(epoll_fd_, op, event->getFd(), &event->getEpollEvent())`
 ```c++
 #define ADD_TO_EPOLL()  \
     auto it = listen_fds_.find(event->getFd()); \
@@ -743,7 +461,6 @@ private:
     DEBUGLOG("add event success, fd [%d:%s], event [%d]", event->getFd(), event->getFdName().c_str(), tmp); \
 ```
 ### 删除EPOLL事件宏
-与上面类似
 ```c++
 #define DEL_TO_EPOLL() \
     auto it = listen_fds_.find(event->getFd()); \
@@ -763,410 +480,21 @@ private:
 
 ```
 
-### eventloop.cc
-#### 初始化与析构
-```c++
-static thread_local EventLoop* t_cur_eventloop = NULL;
-static int g_epoll_max_timeout = 10000;
-static const int g_epoll_max_event = 10;
-
-EventLoop::EventLoop(){
-    if(t_cur_eventloop){
-        ERRORLOG("faild to create event loop, already has a eventloop");
-        exit(0);
-    }
-    tid_ = get_thread_id();
-    
-    epoll_fd_ = epoll_create(1);
-
-    if(epoll_fd_ < 0) {
-        ERRORLOG("failed to create event loop, epoll_create error, error info [%d]", errno);
-        exit(0);
-    }
-
-    initWakeUpFdEvent();
-
-    INFOLOG("success create event loop in thread [%d]", tid_);
-    t_cur_eventloop = this;
-}
-
-EventLoop::~EventLoop(){
-    close(epoll_fd_);
-    if(wakeup_fd_event_){
-        delete wakeup_fd_event_;
-        wakeup_fd_event_ = NULL;
-    }
-}
-
-void EventLoop::initWakeUpFdEvent(){
-    wakeup_fd_ = eventfd(0, EFD_NONBLOCK);
-    if(wakeup_fd_ <= 0){
-        ERRORLOG("failed to create event loop, eventfd create error, error info [%d]", errno);
-        exit(0);
-    }
-
-    wakeup_fd_event_ = new WakeUpFdEvent(wakeup_fd_);
-    wakeup_fd_event_->listen(TriggerEvent::IN_EVENT, 
-        [this]()->void{
-            char buf[8];
-            // -1&&EAGAIN 说明读完了
-            while(read(wakeup_fd_, buf, 8) != -1 && errno != EAGAIN){
-
-            }
-            DEBUGLOG("read full bytes from wakeup fd[%d]", wakeup_fd_);
-        }
-    );    {}
-
-    addEpollEvent(wakeup_fd_event_);
-}
-```
-
-#### 主循环
-```c++
-void EventLoop::loop(){
-    while(!stop_){
-        ScopeMutex<Mutex> lock(mutex_);
-        std::queue<std::function<void()>> tmp_tasks;
-        tasks_.swap(tmp_tasks);
-        lock.unlock();
-
-        while(!tmp_tasks.empty()){
-            auto cb = tmp_tasks.front();
-            tmp_tasks.pop();
-            if(cb) cb();
-        }
-
-        int timeout = g_epoll_max_timeout;
-        epoll_event result_event[g_epoll_max_event];
-        int rt = epoll_wait(epoll_fd_, result_event, g_epoll_max_event, timeout);
-
-        if(rt < 0){
-            ERRORLOG("epoll_wait error, errno=%d", errno);
-            exit(0);
-        }
-        for(int i = 0;i < rt ;++ i){
-            epoll_event trigger_event = result_event[i];
-            FdEvent *fd_event = static_cast<FdEvent*>(trigger_event.data.ptr);
-            if(fd_event == NULL) {
-                continue;
-            }
-
-            if(trigger_event.events & EPOLLIN){
-                DEBUGLOG("fd [%d:%s] trigger EPOLLIN event", fd_event->getFd(), fd_event->getFdName().c_str());
-                addTask(fd_event->handler(TriggerEvent::IN_EVENT));
-            }else if(trigger_event.events & EPOLLOUT){
-                DEBUGLOG("fd [%d:%s] trigger EPOLLOUT event", fd_event->getFd(), fd_event->getFdName().c_str());
-                addTask(fd_event->handler(TriggerEvent::OUT_EVENT));
-            }
-
-        }
-    }
-}
-```
-#### 辅助函数
-``` c++
-void EventLoop::wakeup(){
-    wakeup_fd_event_->wakeup();
-}
-
-void EventLoop::stop(){
-    stop_ = true;
-}
-
-void EventLoop::dealWakeup(){
-
-}
-```
-#### 添加/删除EPOLL操作
-
-```c++
-void EventLoop::addEpollEvent(FdEvent* event){
-    if(isInLoopThread()){
-        ADD_TO_EPOLL();
-    }else{
-        auto callback = [this, event]()->void{
-            ADD_TO_EPOLL();
-        };    {}
-        addTask(callback,true);
-    }
-}
-
-void EventLoop::delEpollEvent(FdEvent* event){
-    if(isInLoopThread()){
-        DEL_TO_EPOLL();
-    }else{
-        auto callback = [this, event]()->void{
-            DEL_TO_EPOLL();
-        };    {}
-        addTask(callback,true);
-    }
-}
-
-bool EventLoop::isInLoopThread(){
-    return get_thread_id() == tid_;
-}
-
-// 添加到队列中
-void EventLoop::addTask(std::function<void()> callback,  bool is_wake_up /*=false*/){
-    ScopeMutex<Mutex> lock(mutex_);
-    tasks_.push(callback);
-    lock.unlock();
-
-    if(is_wake_up){
-        wakeup();
-    }
-}
-```
-## TimerEvent
-一个定时器事件的封装, 包含触发时间, 间隔, 是否取消, 是否重复。
-### timer_event.h
-```c++
-class TimerEvent{
-public:
-    typedef std::shared_ptr<TimerEvent> s_ptr;
-
-    TimerEvent(int internal, bool is_repeated, std::function<void()> callback);
-
-public:
-    void setArriveTime();
-
-    int64_t getArriveTime() const { return arrive_time_; }
-
-    bool isCanceled() const { return is_canceled_; }
-
-    void setCanceled(bool c) { is_canceled_ = c; }
-
-    bool isRepeated() const { return is_repeated_; }
-
-    void setRepeated(bool r) { is_repeated_ = r; }
-
-    std::function<void()> getCallBack() { return task_; }
-
-private:
-    int64_t arrive_time_;
-    int64_t internal_;
-    bool is_repeated_{false};
-    bool is_canceled_{false};
-
-    std::function<void()> task_;
-};
-```
-### timer_event.cc
-```c++
-TimerEvent::TimerEvent(int internal, bool is_repeated, std::function<void()> callback)
-        :internal_(internal), is_repeated_(is_repeated), task_(callback){
-    // 
-    arrive_time_ = get_now_ms() + internal_;
-    DEBUGLOG("success create timer event, will execute at [%lld]", arrive_time_);
-}
-
-void TimerEvent::setArriveTime(){
-    arrive_time_ = arrive_time_ + internal_;
-    // int64_t now = get_now_ms();
-    // if (arrive_time_ < now) {
-    //     arrive_time_ = now + (internal_ - (now - arrive_time_) % internal_);
-    // }
-    DEBUGLOG("reset timer event, will execute at [%lld]", arrive_time_);
-}
-```
-## Timer
-定时器事件封装, 除了下面的实现我觉得也可以控制往WakeUpFd写入数据来触发epoll_wait, 性能未知。
-
-最重要的是 `timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC)` 创建一个fd  
-和 `timerfd_settime(getFd(), 0, &value, NULL)` 让内核在timespec规定的事件触发一次EPOLLIN  
-所以需要listen(IN_EVENT, bind(ontimer))  
-在ontimer中会顺序执行定时器记录的所有任务  
-在eventloop中添加定时器后, 定时器会周期性的timerfd_settime让内核通知epoll有写入事件, 随后会调用这里的ontimer回调执行定时任务, ontimer中会再次设置timerfd_settime。
-### timer.h
-```c++
-class Timer:public FdEvent{
-public:
-    Timer();
-    
-    ~Timer();
-
-public:
-    void addTimerEvent(TimerEvent::s_ptr event);
-
-    void deleteTimerEvent(TimerEvent::s_ptr event);
-
-    void onTimer(); // 发生IO事件后, eventloop会执行这个函数
-
-private:
-    std::multimap<int64_t, TimerEvent::s_ptr> events_;
-    Mutex mutex_;
-
-private:
-    void resetArriveTime();
-};
-```
-### timer.cc
-```c++
-Timer::Timer(): FdEvent(timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC), "TIMER"){
-    
-    INFOLOG("timer init,\t fd=%d", getFd());
-
-    // 把fd的可读事件放到event上监听
-    listen(FdEvent::IN_EVENT, std::bind(&Timer::onTimer, this));
-}
-
-Timer::~Timer(){
-
-}
-```
-#### addTimerEvent/deleteTimerEvent
-访问mutimap前加锁  
-
-添加  
-如果被添加的event的触发事件＞队首的event的触发时间, 需要让内核在新的时间通知自己。
-
-删除  
-遍历events找到要删除的事件删除
-```c++
-void Timer::addTimerEvent(TimerEvent::s_ptr event){
-    bool is_reset_timerfd = false;
-
-    ScopeMutex<Mutex> lock(mutex_);
-    if(events_.empty()){
-        is_reset_timerfd = true;
-    }else{
-        auto it = events_.begin();
-        if((*it).second->getArriveTime() > event->getArriveTime()){
-            is_reset_timerfd = true;
-        }
-    }
-    events_.emplace(event->getArriveTime(), event);
-    lock.unlock();
-
-    if(is_reset_timerfd){
-        resetArriveTime();
-    }
-    DEBUGLOG("success add TimerEvent at arrivetime %lld", event->getArriveTime());
-}
-
-void Timer::deleteTimerEvent(TimerEvent::s_ptr event){
-    event->setCanceled(true);
-
-    ScopeMutex<Mutex> lock(mutex_);
-
-    auto begin = events_.lower_bound(event->getArriveTime());
-    auto end = events_.upper_bound(event->getArriveTime());
-
-    auto it = begin;
-    for(it = begin; it != end ; ++ it){
-        if(it->second == event){
-            break;
-        }
-    }
-    if(it != end) { 
-        events_.erase(it);
-    }
-
-    lock.unlock();
-    DEBUGLOG("success delete TimerEvent at arrivetime %lld", event->getArriveTime());
-}
-```
-#### onTimer
-先消费timerfd的内容。  
-随后遍历events, 备份到期的事件并删除, 同时保存其回调  
-遍历保存的到期任务, 如果是重复任务就重置下一次执行的事件, 再次添加到events中
-遍历回调并执行  
-```c++
-void Timer::onTimer(){
-    // 处理缓冲区
-    char buf[8];
-    while(1){
-        if((read(getFd(), buf, 8) == -1) && errno == EAGAIN){
-            break;
-        }
-    }
-
-    // 执行定时任务
-    int64_t now = get_now_ms();
-    DEBUGLOG("ontime at %lld", now);
-    std::vector<TimerEvent::s_ptr> tmps;
-    std::vector<std::pair<uint64_t, std::function<void()>>> tasks;
-
-    ScopeMutex<Mutex> lock(mutex_);
-    auto it = events_.begin();
-
-    for(it = events_.begin(); it != events_.end(); ++ it){
-        // 如果到期
-        if((*it).second->getArriveTime() < now ){
-            if(!(*it).second->isCanceled()){
-                tmps.emplace_back((*it).second);
-                tasks.emplace_back(std::make_pair((*it).second->getArriveTime(), (*it).second->getCallBack()));
-            }
-        // 没有到期说明后面的也没到期
-        } else {
-            break;
-        }
-    }
-
-    events_.erase(events_.begin(), it);
-    lock.unlock();
-
-    // 重新添加event
-    for(auto i = tmps.begin(); i != tmps.end(); ++i){
-        if((*i)->isRepeated()){
-            (*i)->setArriveTime();
-            addTimerEvent((*i));
-        }
-    }
-
-    resetArriveTime();
-
-    for(auto p = tasks.begin(); p != tasks.end(); ++p){
-        if(p->second) p->second();
-    }
-}
-```
-#### resetArriveTime
-重要
-
-大体意思是, 如果最近的任务已经过时了, 让内核尽快通知自己去执行。
-如果最近的任务还没执行, 让内核在对应的事件通知自己。
-```c++
-void Timer::resetArriveTime(){
-    ScopeMutex<Mutex> lock(mutex_);
-    auto tmp = events_;
-    lock.unlock();
-
-    if(tmp.empty()){
-        return;
-    }
-
-    int64_t now = get_now_ms();
-    int64_t internal;
-    auto it = tmp.begin();
-    // 如果第一个任务还没执行, 设置间隔为
-    if(it->second->getArriveTime() > now){
-        internal = it->second->getArriveTime() - now;
-    } else {
-        internal = 100;
-    }
-    DEBUGLOG("reset arrive time internal:%lld", internal);
-
-    // s -> ms -> us -> ns
-    timespec ts;
-    bzero(&ts, sizeof(ts));
-    ts.tv_sec = internal / 1000;
-    ts.tv_nsec = (internal % 1000) * 1000000;
-
-    itimerspec value;
-    bzero(&value, sizeof(value));
-    value.it_value = ts;
-
-    // 告诉内核多久后唤醒我
-    int rt = timerfd_settime(getFd(), 0, &value, NULL);
-    if( rt != 0 ){
-        ERRORLOG("timerfd_settime error, errno=%d, error=%s", errno, strerror(errno));
-    }
-}
-```
-
-## IO 线程
-创建一个IO线程，他会帮我们执行：
+### 初始化与析构
+1. tid_
+2. epoll_fd_
+3. initWakeUpFdEvent
+    - 创建 wakeupfd
+    - 当触发可读(IN_EVENT)，回调：消费所有数据。
+    - 监听 wakeupfd
+    - 后续调用 wakeup_fd_event_->wakeup(); 写入触发可读。
+4. initTimer
+    - 创建定时器
+    - 
+    - 监听定时器
+
+## IOThread
+创建一个IOThread，他会帮我们执行：
 1. 创建一个新线程
 2. 在新线程里创建一个eventloop完成初始化
 3. 开启loop循环
@@ -1184,147 +512,19 @@ init
 post: +1  
 wait: -1  
 destory  
-### io_thread.h
-封装EventLoop, 初始化一个线程去执行,   
+
+使用信号量机制，主线程(创建IOThread)必须等到EventLoop被创建完成才能返回，  
+而从线程(EventLoop)必须等待主线程调用start才能开启loop。
+
 注意这里必须在start前完成AddEpollEvent, 否则只能由其他线程来AddEpollEvent（本线程会被阻塞在loop中）。
-```c++
-class IOThread{
-public:
-    IOThread();
 
-    ~IOThread();
-
-public:
-    static void* Main(void *args);
-
-    EventLoop* getEventloop() const { return eventloop_; }
-
-    void start();
-
-    void join();
-
-private:
-    pid_t tid_ {0};                // 线程号
-    pthread_t thread_ {0};         // 线程句柄
-    EventLoop* eventloop_ {NULL};   // io线程的loop
-
-    sem_t init_semaphore_;
-    sem_t start_semaphore_;
-};
-```
-### io_thread.cpp
-```c++
-IOThread::IOThread(){
-    int rt = sem_init(&init_semaphore_, 0, 0);
-    assert(rt == 0);
-    rt = sem_init(&start_semaphore_, 0, 0);
-    assert(rt == 0);
-    pthread_create(&thread_, NULL, &IOThread::Main, this);
-
-    // 需要等到Main函数的eventloop循环启动才返回
-    sem_wait(&init_semaphore_);
-
-    DEBUGLOG("IOThread [%d] create success", tid_);
-}
-
-IOThread::~IOThread(){
-    if(eventloop_) eventloop_->stop();
-    sem_destroy(&init_semaphore_);
-    pthread_join(thread_, NULL);
-
-    if(eventloop_){
-        delete eventloop_;
-        eventloop_ = NULL;
-    }
-}
-
-void* IOThread::Main(void *args){
-    IOThread* thread = static_cast<IOThread*>(args);
-
-    thread->eventloop_ = new EventLoop();
-    thread->tid_ = get_thread_id();
-
-    sem_post(&thread->init_semaphore_);
-
-    DEBUGLOG("IOThread [%d] wait start", thread->tid_);
-    sem_wait(&thread->start_semaphore_);
-
-    DEBUGLOG("IOThread [%d] start eventloop", thread->tid_);
-    thread->eventloop_->loop();
-    DEBUGLOG("IOThread [%d] end eventloop", thread->tid_);
-    return nullptr;
-}
-
-void IOThread::start(){
-    sem_post(&start_semaphore_);
-}
-
-void IOThread::join(){
-    pthread_join(thread_, NULL);
-}
-```
-### io_thread_group.h
+## IOThreadGroup
 一个池
-```c++
-class IOThreadGroup{
-public:
-    IOThreadGroup(int size);
-    
-    ~IOThreadGroup();
-
-public: 
-    void start();
-
-    void join();
-
-    IOThread* getIOThread();
-
-public:
-
-private:
-    int size_;
-    int index_;
-    std::vector<IOThread*> io_thread_groups_;
-};
-```
-
-### io_thread_group.cc
-```c++
-IOThreadGroup::IOThreadGroup(int size): size_(size){
-    io_thread_groups_.resize(size);
-    for(int i =0;i < size; ++i){
-        io_thread_groups_[i] = new IOThread();
-    }
-}
-    
-IOThreadGroup::~IOThreadGroup(){
-
-}
-
-void IOThreadGroup::start(){
-    for(int i = 0;i < size_; ++ i){
-        io_thread_groups_[i]->start();
-    }
-}
-
-void IOThreadGroup::join(){
-    for(int i = 0;i < size_; ++ i){
-        io_thread_groups_[i]->join();
-    }
-}
-
-IOThread* IOThreadGroup::getIOThread(){
-    if(index_ >= io_thread_groups_.size() || index_ == -1){
-        index_ = 0;
-    }
-    return io_thread_groups_[index_++];
-}
-```
 
 信号量 semaphore, sem_init, sem_wait, 等待信号量+1返回。
 
 # TCP  
-参考muduo  
+参考 muduo 网络库
 ## TcpBuffer  
 负责把发送的数据写入Buffer然后从Buffer写入到发送缓冲区,  
 或者把接收缓冲区里的数据读到Buffer中。
@@ -1336,469 +536,66 @@ IOThread* IOThreadGroup::getIOThread(){
 - 提高一个发送效率，可以多包合并发送。
 
 循环可扩容数组
-### tcp_buffer.h
-```c++
-class TcpBuffer{
-public:
-    TcpBuffer(size_t size);
 
-    ~TcpBuffer();
-
-public:
-    size_t readable();
-    
-    size_t writeable();
-
-    size_t getReadIdx() { return read_idx_; }
-
-    size_t getWriteIdx() { return write_idx_; }
-
-    void resizeBuffer(size_t new_size);
-
-    void writeToBuf(const char* data, size_t len);
-
-    void readFromBuf(std::vector<char>& re, size_t size);
-
-    void moveReadIndex(size_t len);
-
-    void moveWriteIndex(size_t len);
-private:
-    size_t read_idx_{0};
-    size_t write_idx_{0};
-    size_t size_{0};
-    bool full_{false};
-
-    std::vector<char> buffer_;
-};
-```
-### tcp_buffer.cc
 readindex/writeindex  
 size = (writeindex-readindex+buffersize)%buffersize
 
-```c++
-TcpBuffer::TcpBuffer(size_t size):size_(size){
-    buffer_.resize(size_);
-}
+方法：
+1. readable     获得可读出的空间大小
+2. writeable    获得可写入的空间大小
+3. getReadIdx   获得可读的位置
+4. getWriteIdx  获得可写的位置
+5. resizeBuffer 扩容
+6. writeToBuf   将 const char* data 写入
+7. readFromBuf  读出到 std::vector<char>& re
+8. moveReadIndex    跳过n
+9. moveWriteIndex   跳过n
 
-TcpBuffer::~TcpBuffer(){
+## IPNetAddr
+对 sockaddr 的封装
 
-}
+方法：
+1. 用不同的方式初始化
+2. getSockAddr  获取 sockaddr
+3. getSockLen   获取 socklen_t size
+4. getFamily    获取地址族
+5. toString
+6. checkValid
+变量：
+1. ip
+2. port
+3. sockaddr_in addr
 
-size_t TcpBuffer::readable(){
-if (full_) return size_;
-    if (write_idx_ >= read_idx_) {
-        return write_idx_ - read_idx_;
-    }
-    return size_ - read_idx_ + write_idx_;
-}
+要点
+- inet_ntoa numeric to ascii (uint32_t to char*)
+- inet_addr char* to uint32_t
+- ntohs     network to host short
 
-size_t TcpBuffer::writeable(){
-    return size_ - readable();
-}
-
-void TcpBuffer::resizeBuffer(size_t new_size){
-    std::vector<char> new_buf(new_size);
-    size_t r = readable();
-    
-    // 手动复制数据，不调用 readFromBuf
-    if (r > 0) {
-        size_t end_data = size_ - read_idx_;
-        if (r <= end_data) {
-            memcpy(&new_buf[0], &buffer_[read_idx_], r);
-        } else {
-            memcpy(&new_buf[0], &buffer_[read_idx_], end_data);
-            memcpy(&new_buf[end_data], &buffer_[0], r - end_data);
-        }
-    }
-    
-    buffer_.swap(new_buf);
-    size_ = new_size;
-    read_idx_ = 0;
-    write_idx_ = r;
-    full_ = (r == size_);
-}
-
-void TcpBuffer::writeToBuf(const char* data, size_t len){
-    if(len > writeable()){
-        // 扩容
-        resizeBuffer(len + size_);
-    }
-    size_t end_space = size_ - write_idx_;
-    if(len <= end_space){
-        memcpy(&buffer_[write_idx_], data, len);
-        write_idx_ = (write_idx_ + len) % size_;
-    } else {
-        memcpy(&buffer_[write_idx_], data, end_space);
-        memcpy(&buffer_[0], data + end_space, len - end_space);
-        write_idx_ = len - end_space;
-    }
-
-    if (write_idx_ == read_idx_) full_ = true;
-}
-
-void TcpBuffer::readFromBuf(std::vector<char>& re, size_t len){
-    size_t avail = readable();
-    if (avail == 0) return;
-    len = std::min(len, avail);
-
-    std::vector<char> tmp(len);
-    size_t end_data = size_ - read_idx_;
-    if (len <= end_data) {
-        memcpy(&tmp[0], &buffer_[read_idx_], len);
-        read_idx_ = (read_idx_ + len) % size_;
-    } else {
-        memcpy(&tmp[0], &buffer_[read_idx_], end_data);
-        memcpy(&tmp[end_data], &buffer_[0], len - end_data);
-        read_idx_ = len - end_data;
-    }
-
-    if (full_) full_ = false;
-    re.swap(tmp);
-}
-
-
-void TcpBuffer::moveWriteIndex(size_t len){
-    if (len == 0) return;
-    
-    size_t avail = writeable();
-    if (len > avail) {
-        len = avail;  // 限制移动长度不超过可写空间
-    }
-    
-    write_idx_ = (write_idx_ + len) % size_;
-    
-    // 更新 full_ 标志
-    if (write_idx_ == read_idx_) {
-        full_ = true;
-    }
-}
-
-void TcpBuffer::moveReadIndex(size_t len){
-    if (len == 0) return;
-    
-    size_t avail = readable();
-    if (len > avail) {
-        len = avail;  // 限制移动长度不超过可读数据
-    }
-    
-    read_idx_ = (read_idx_ + len) % size_;
-    
-    // 更新 full_ 标志
-    if (read_idx_ != write_idx_) {
-        full_ = false;
-    }
-}   
-```
 ## TcpAcceptor
 socket-bind-listen-accept   
 SO_REUSEADDR 监听一个套接字，然后服务器关闭，重启这个服务，如果是同一个端口可能会报bind错误，addr已经被绑定。  
 因为tcp在主动关闭连接的一方，套接字会变成timewait状态，处于timewait状态会持续占用端口，如果新程序在这个端口启动，bind就会出错。  
 该选项可以重新绑定这个端口。  
 
-tcpacceptor负责 1. listen 2. acceptor 3. addepollevent到eventloop
-具体执行由eventloop负责
-### net_addr.h
-对 sockaddr 的封装
-```c++
-class NetAddr{
+变量：
+1. local_addr_  服务端监听的地址 addr -> ip:port
+2. family_      地址协议族
+3. listenfd_    
 
-public:
-    typedef std::shared_ptr<NetAddr> s_ptr;
+方法：
+1. 初始化
+    - 创建一个socket为listen_fd_
+    - setsockopt(listenfd_, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) 设置可重绑定
+    - bind(listenfd_, local_addr->getSockAddr(), local_addr_->getSockLen())
+    - listen(listenfd_, 1000)
+2. `std::pair<int, NetAddr::s_ptr> TcpAcceptor::accept()`
+    - int client_fd = ::accept(listenfd_, reinterpret_cast<sockaddr*>(&client_addr), &client_addr_len);
+    - 返回 client_addr 和 fd
+3. getListenFd 返回 listen_fd_
 
-    virtual sockaddr* getSockAddr() = 0;
+核心功能是新建一个该对象相当于新建一个 socket 去 bind/listen, 外部需要封装它到FdEvent然后添加到epoll监听IN_EVENT，
+当事件发生调用 accept，将连接的 socket 封装到FdEvent添加到工作线程的epoll里监听。
 
-    virtual socklen_t getSockLen() = 0;
-
-    virtual int getFamily() = 0;
-
-    virtual std::string toString() = 0;
-
-    virtual bool checkValid() = 0;
-};
-
-class IPNetAddr: public NetAddr{
-
-public:
-    IPNetAddr(const std::string& ip, uint16_t port);
-
-    IPNetAddr(const std::string& addr);
-
-    IPNetAddr(sockaddr_in addr);
-
-    sockaddr* getSockAddr();
-
-    socklen_t getSockLen();
-
-    int getFamily();
-
-    std::string toString();
-
-    bool checkValid();
-
-private:
-    std::string  ip_;
-    uint16_t port_;
-    sockaddr_in addr_;
-};
-```
-### net_addr.cc
-```c++
-IPNetAddr::IPNetAddr(const std::string& ip, uint16_t port):ip_(ip), port_(port){
-    memset(&addr_, 0, sizeof(addr_));
-
-    addr_.sin_family = AF_INET;
-    // inet_addr() 点分十进制IP地址 转换为网络字节序
-    addr_.sin_addr.s_addr = inet_addr(ip_.c_str());
-    // 主机序转换为网络字节序
-    addr_.sin_port = htons(port_);
-}
-
-IPNetAddr::IPNetAddr(const std::string& addr){
-    size_t i = addr.find_first_of(":");
-    if(i == addr.size()){
-        ERRORLOG("invalid ipv4 addr %s", addr.c_str());
-        return ;
-    }
-    ip_ = addr.substr(0, i);
-    port_ = std::atoi(addr.substr(i+1, addr.size()-i-1).c_str());
-
-    
-    memset(&addr_, 0, sizeof(addr_));
-    addr_.sin_family = AF_INET;
-    addr_.sin_addr.s_addr = inet_addr(ip_.c_str());
-    addr_.sin_port = htons(port_);
-}
-
-IPNetAddr::IPNetAddr(sockaddr_in addr):addr_(addr){
-    ip_ = inet_ntoa(addr_.sin_addr);
-    port_ = ntohs(addr.sin_port);
-}
-
-sockaddr* IPNetAddr::getSockAddr(){
-    return reinterpret_cast<sockaddr*>(&addr_);
-}
-
-socklen_t IPNetAddr::getSockLen(){
-    return sizeof(addr_);
-}
-
-int IPNetAddr::getFamily(){
-    return AF_INET;
-}
-
-std::string IPNetAddr::toString(){
-    return ip_ + ":" + std::to_string(port_);
-}
-
-bool IPNetAddr::checkValid(){
-    if(ip_.empty()) {
-        return false;
-    }
-    if(port_ <= 0 || port_ > 65535){
-        return false;
-    }
-    if(inet_addr(ip_.c_str()) == INADDR_NONE) {
-        return false;
-    }
-    return true;
-}
-```
-### tcp_acceptor.h
-```c++
-class TcpAcceptor {
-
-public:
-    TcpAcceptor(NetAddr::s_ptr local_addr);
-
-    ~TcpAcceptor();
-
-public:
-    int accept();
-
-private:
-    NetAddr::s_ptr local_addr_; // 服务端监听的地址 addr -> ip:port
-    int family_{-1};            // 地址协议族
-    int listenfd_{-1};           // listenfd
-    
-};
-```
-### tcp_acceptor.cc
-```c++
-TcpAcceptor::TcpAcceptor(NetAddr::s_ptr local_addr):local_addr_(local_addr){
-    if(!local_addr_->checkValid()){
-        ERRORLOG("invalid local addr %s", local_addr_->toString().c_str());
-        exit(0);
-    }
-    family_ = local_addr_->getFamily();
-    listenfd_ = socket(family_, SOCK_STREAM, 0);
-    if(listenfd_ == 0){
-        ERRORLOG("invalid listenfd %d", listenfd_);
-        exit(0);
-    }
-
-    int val = 1;
-    // SO_REUSEADDR 监听一个套接字，然后服务器关闭，重启这个服务，如果是同一个端口可能会报bind错误，addr已经被绑定。
-    // 因为tcp在主动关闭连接的一方，套接字会变成timewait状态，处于timewait状态会持续占用端口，如果新程序在这个端口启动，bind就会出错。
-    // 该选项可以重新绑定这个端口。
-    if(setsockopt(listenfd_, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) != 0){
-        ERRORLOG("setsockopt REUSEADDR error, errno=%d, error=%s", errno, strerror(errno));
-    }
-
-    socklen_t len = local_addr_->getSockLen();
-    int rt = bind(listenfd_, local_addr->getSockAddr(), len);
-    if(rt != 0){
-        ERRORLOG("bind error, errno=%d, error=%s", errno, strerror(errno));
-        exit(0);
-    }
-
-    rt = listen(listenfd_, 1000);
-    if(rt != 0){
-        ERRORLOG("listen error, errno=%d, error=%s", errno, strerror(errno));
-        exit(0);
-    }
-}
-
-TcpAcceptor::~TcpAcceptor(){
-
-}
-
-int TcpAcceptor::accept(){
-    if(family_ == AF_INET){
-        sockaddr_in client_addr;
-        bzero(&client_addr,sizeof(client_addr));
-        socklen_t client_addr_len = sizeof(client_addr);
-
-        int client_fd = ::accept(listenfd_, reinterpret_cast<sockaddr*>(&client_addr), &client_addr_len);
-        if(client_fd < 0){
-            ERRORLOG("accept error, errno=%d, error=%s", errno, strerror(errno));
-        }
-
-        IPNetAddr addr(client_addr);
-        INFOLOG("A client have accept succ, peer addr [%s]", addr.toString().c_str());
-        return client_fd;
-        
-    }
-    return -1;
-}
-```
-
-## TcpServer  
-![主从Reactor](img/主从.png)
-
-工作流程： A(主循环) B(工作线程)
-1. [线程A]创建TcpServer
-   1. 创建A
-      1. 向线程自己添加wakeup、timer
-   2. 创建线程组
-      1. 创建B
-         1. 向线程自己添加wakeup、timer
-2. [线程A]监听listenfd的INEVENT, 回调onAcceptor:
-      1. 创建一个connection:
-      2. 初始化buffer
-      3. 创建fdevent
-      4. 添加到[线程B]的监听中, 由于是异线程, 会添加到任务队列中让线程自己添加
-3. [线程A]启动
-4. [线程A]触发新连接, 调用2中的步骤
-   1. 把监听任务添加到[线程B]的任务队列并且唤醒
-5. [线程B]被唤醒
-   1. 执行监听任务监听连接的INEVENT
-6. [线程B]触发INEVENT
-   1. read
-   2. execute
-   3. write
-7. [线程B]对端关闭 clear
-8. [线程B]主动关闭 shutdown
-
-主线程通过一个EventLoop循环的从Client接收连接请求并且注册给IO线程  
-只注册Acceptor，绑定的处理方法是将连接对应的处理函数构造成EPOLL事件在IO线程注册。
-
-IO线程则监听这些事件，等待EPOLL触发。
-
-### tcp_server.h
-```c++
-class TcpServer{
-
-public:
-    TcpServer(NetAddr::s_ptr local_addr);
-
-    ~TcpServer();
-
-public:
-    void start();
-
-private:
-    void init();
-    
-    // 有新客户端连接需要执行
-    void onAccept();
-
-private:
-    TcpAcceptor::s_ptr acceptor_;
-    NetAddr::s_ptr local_addr_;             // 本地监听的地址
-    FdEvent *listen_fd_event_{0};
-    
-    EventLoop* main_event_loop_{NULL};      // main reactor
-    IOThreadGroup* io_thread_group_{NULL};  // subReactor 组
-    
-    int client_counts_{0};
-};
-```
-### tcp_server.cc
-```c++
-TcpServer::TcpServer(NetAddr::s_ptr local_addr):local_addr_(local_addr){
-    INFOLOG("[TcpServer] Start create");
-    init();
-    INFOLOG("[TcpServer] Success create on [%s]", local_addr->toString().c_str());
-}
-
-TcpServer::~TcpServer(){
-    if(main_event_loop_){
-        delete main_event_loop_;
-        main_event_loop_ = NULL;
-    }
-    if(io_thread_group_){
-        delete io_thread_group_;
-        io_thread_group_ = NULL;
-    }
-}
-
-void TcpServer::start(){
-    DEBUGLOG("tcpServer start - io_thread_group");
-    io_thread_group_->start();
-    main_event_loop_->loop();
-}
-
-void TcpServer::init(){
-    acceptor_ = std::make_shared<TcpAcceptor>(local_addr_);
-
-    DEBUGLOG("---------- tcpServer mian_event_loop create ----------");
-    main_event_loop_ = EventLoop::GetCurEventLoop();
-
-    DEBUGLOG("---------- tcpServer io_thread_group create ----------");
-    io_thread_group_ = new IOThreadGroup(2);
-
-    listen_fd_event_ = new FdEvent(acceptor_->getListenFd(), "监听主循环事件");
-    listen_fd_event_->listen(FdEvent::IN_EVENT, std::bind(&TcpServer::onAccept, this));
-
-    main_event_loop_->addEpollEvent(listen_fd_event_);
-    DEBUGLOG("----------        tcpServer init over        ----------");
-}
-
-// 有一个新连接来了， maineventloop处理，添加到 iothreadgroup中
-void TcpServer::onAccept(){
-    int client_fd = acceptor_->accept();
-    ++client_counts_;
-
-    IOThread* io_thread = io_thread_group_->getIOThread();
-    
-    TcpConnection::s_ptr connection = std::make_shared<TcpConnection>(io_thread, client_fd, 128, peer_addr);
-    connection->setState(TcpConnection::Connected);
-    client_.insert(connection);
-    
-
-    INFOLOG("[TcpServer] Success get client fd=%d", client_fd);
-}
-```
 ## TcpConnection  
 ![](img/TcpConnection.png)
 对客户端和服务端有不同的逻辑
@@ -2158,6 +955,33 @@ void TcpConnection::pushReadMessage(std::string msg_id, std::function<void(Abstr
 }
 ```
 
+## TcpServer  
+![主从Reactor](img/主从.png)
+
+成员：
+1. TcpAcceptor::s_ptr acceptor_;            
+2. NetAddr::s_ptr local_addr_;  
+3. FdEvent *listen_fd_event_;   
+4. EventLoop* main_event_loop_;
+5. IOThreadGroup* io_thread_group_;
+6. std::unordered_set<TcpConnection::s_ptr> client_;
+7. int client_counts_{0};
+
+方法：（由主线程调用）
+1. 初始化   调用 init();
+2. void start();
+3. void init();
+    - 新建 main_event_loop_
+    - 新建 io_thread_groups_
+    - 监听 listen_fd_ 的　IN_EVENT，回调 onAccpet();
+4. void onAccept();
+    - 调用 acceptor 的 accept 方法，生成一个连接socket，获取其fd和对端地址。
+    - 在一个工作线程上新建一个Connection，内部会在这个工作线程上监听连接的 socket fd。
+
+主EventLoop只负责Accept，从Client接收连接并且注册给IO线程，一般只监听IN，等IN处理完了监听OUT，等OUT处理完了删除对OUT的监听。
+
+IO线程则监听这些事件，等待EPOLL触发。
+
 ## TcpClient  
 - Connect: 连接对端
 - Write:    将RPC请求encode然后发送给服务端
@@ -2172,120 +996,37 @@ void TcpConnection::pushReadMessage(std::string msg_id, std::function<void(Abstr
 Client也需要使用主从Reactor，主Reactor负责连接和添加新的事件，从Reactor负责发送新的事件。
 Server执行完之后会清除事件。
 
-### tcp_client.cc
+成员：
 ```c++
-TcpClient::TcpClient(NetAddr::s_ptr peer_addr):peer_addr_(peer_addr){
-    event_loop_ = EventLoop::GetCurEventLoop();
-    fd_ = socket(peer_addr->getFamily(), SOCK_STREAM, 0);
-
-    if(fd_ < 0){
-        ERRORLOG("create socket error");
-        return ;
-    }
-
-    fd_event_ = FdEventGroup::GetFdEventGroup()->getFdEvent(fd_);
-    fd_event_->setNonBlock();
-
-    connection_ = std::make_shared<TcpConnection>(event_loop_, fd_, 128, peer_addr_, TcpConnection::ServerConnectionByClient);
-
-}
-
-TcpClient::~TcpClient(){
-    if(fd_ > 0){
-        close(fd_);
-    }
-}
-
-void TcpClient::connect(std::function<void()> callback){
-    int rt = ::connect(fd_, peer_addr_->getSockAddr(), peer_addr_->getSockLen());
-    if(rt == 0){
-        DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
-    }else if(rt == -1){
-        if(errno == EINPROGRESS){
-            // epoll 监听可写
-            DEBUGLOG("connect in progress");
-
-            fd_event_->listen(FdEvent::OUT_EVENT, [this, callback]()->void{
-                {}
-                int err = 0;
-                socklen_t len = sizeof(err);
-                getsockopt(fd_, SOL_SOCKET, SO_ERROR, &err, &len);
-                bool is_connected = false;
-                if(err == 0){
-                    DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
-                    connection_->setState(TcpConnection::Connected);
-                    is_connected = true; 
-                } else {
-                    ERRORLOG("connect error, errno=%d, error=%s", err, strerror(errno));
-                }
-                // 连接完成去掉可写事件监听，否则会一直除法
-                DEBUGLOG("去掉可写事件监听");
-                fd_event_->cancel(FdEvent::OUT_EVENT);
-                event_loop_->addEpollEvent(fd_event_);
-
-                // 连接成功才执行回调
-                if(is_connected && callback) callback();
-            });
-            
-            event_loop_->addEpollEvent(fd_event_);
-            if(!event_loop_->isLooping()) {
-                event_loop_->loop();
-            }
-
-        } else {
-            ERRORLOG("connect error, errno=%d, error=%s", errno, strerror(errno));
-            return ;
-        }
-    }
-}
-
-void TcpClient::writeMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback){
-    //1. 把message编码写入到connection的buffer中, done 也要写入。
-    //2. 启动connection可写事件。
-    connection_->pushSendMessage(message, callback);
-    connection_->listenWrite();
-}
-
-void TcpClient::readMessage(const std::string &msg_id, std::function<void(AbstractProtocol::s_ptr)> callback){
-    //1. 启动connection可读事件
-    //2. 从buffer中解码读出message, 判断 msg_id 是否相等，相等则读成功，执行其回调。
-    connection_->pushReadMessage(msg_id, callback);
-    connection_->listenRead();
-}
+NetAddr::s_ptr peer_addr_;              // 对端
+    NetAddr::s_ptr local_addr_;             // 本地
+    EventLoop* event_loop_{NULL};           // event_loop
+    int fd_{-1};                            // connection 的 fd
+    FdEvent* fd_event_{NULL};               // connection 的 fd_event
+    TcpConnection::s_ptr connection_{NULL}; // 连接
+    int connect_error_code_{0};             // 错误码
+    std::string connect_error_info_;        // 错误信息
 ```
-
-### tcp_client.h
-```c++
-class TcpClient {
-
-public: 
-    TcpClient(NetAddr::s_ptr peer_addr);
-
-    ~TcpClient();
-
-public:
-    // 异步connect
-    // 如果调用connect成功，callback会执行
-    void connect(std::function<void()> callback);
-
-    // 异步发送 message
-    // 发送成功会调用callback，callback入参是message对象
-    void writeMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback);
-
-    // 异步接收 message
-    // 接收成功会调用callback， callback入参是message对象
-    void readMessage(const std::string &msg_id, std::function<void(AbstractProtocol::s_ptr)> callback);
-
-
-private:
-    NetAddr::s_ptr peer_addr_;
-    EventLoop* event_loop_{NULL};
-
-    int fd_{-1};
-    FdEvent* fd_event_{NULL};
-    TcpConnection::s_ptr connection_{NULL};
-};
-```
+方法:
+1. TcpClient 初始化
+    - 新建一个socket_fd 封装为 FdEvent
+    - 创建connection 
+    - 在epoll循环中监听该FdEvent的读事件
+2. void connect(std::function<void()> callback);
+    - 系统connect方法的返回值为0说明连接成功，初始化本地地址并且 调用 callback。
+    - 返回值为 -1 && errno=EINPROGRESS，则监听可写事件，可写后用connect验证是否连接成功。
+    - 否则设置错误信息并且触发回调。 这里执行回调的原因是，回调里由判断是否连接成功的代码。
+    - 第二次connect返回值为 0 或者 errno=EISCONN 说明连接成功，初始化本地地址并且 调用 callback。
+    - 否则设置错误信息并且关闭fd重新打开。
+3. void writeMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback);
+    - 把message编码写入到connection的buffer中, done 也要写入。
+    - 启动connection可写事件。
+4. void readMessage(const std::string &msg_id, std::function<void(AbstractProtocol::s_ptr)> callback);
+    - 从buffer中解码读出message, 判断 msg_id 是否相等，相等则读成功，执行其回调。
+    - 启动connection可读事件。
+void stop();
+5. void initLocalAddr();        初始化本地地址和端口
+6. void addTimerEvent(TimerEvent::s_ptr timer_event);   添加计时器
 
 # RPC  
 为什么要定义一个RPC协议，既然做了ProtoBuf序列化，为什么不把序列化结果直接发送？
@@ -2309,6 +1050,8 @@ RPC过程：read - decode - dispatche - encode - write
 [CheckSum]                          // 校验和
 [End 0x03]
 ```
+
+后续加一个 timeval 做服务端超时检测，超时就不做了。
 
 基于Protobuf的RPC协议编码  
 基于Protobuf的RPC协议解码 
@@ -2407,11 +1150,167 @@ service->CallMethod(method, &controller, req_msg, rsp_msg, NULL);
 7. **encode 插入 buffer 发送回包** 
 
 ### RpcController  
+客户端和服务端各自有自己的Controller  
+- 在客户端
+    1. controller 负责给 RpcChannel 传递参数(msg_id_) 或者错误信息(error_code_/error_info_) 或者超时信息(timeout)
+    2. 超时信息中，设置定时器到时则跳过执行回调函数。
+- 服务端
+    1. controller 可以用于负责控制超时，框架检查定时器到期则设置 controller->StartCancel()
+    2. 在业务层逻辑中判断 controller->IsCanceled() 来适时的终端程序
+    3. 执行完发现IsCanceled()则跳过 write
+
+Controller负责传递一些上下文信息。
+这里有一个问题是，我目前是用的 主从Reactor架构，没有工作线程，IO线程同步执行，没有实时检查Deadline的能力，只能让业务逻辑自己检查，很不好。
+
+也就是
+```scss
+主 EventLoop（Acceptor）
+    ↓ 负责监听、accept 新连接
+    ↓
+从 EventLoop 线程1 —— 专门负责 conn1 的读写事件 + 执行业务逻辑
+从 EventLoop 线程2 —— 专门负责 conn2 的读写事件 + 执行业务逻辑
+从 EventLoop 线程3 —— 专门负责 conn3 的读写事件 + 执行业务逻辑
+```
+后续可能改成协程或者 I/O Reactor + Worker ThreadPool 架构
+```scss
+主 EventLoop（Acceptor）
+    ↓ 监听新连接
+    ↓
+从 EventLoop1~N （I/O线程）
+    ↓ 只负责：
+       - epoll读写事件
+       - 反序列化/序列化消息
+       - 把业务请求打包后扔进任务队列
+       - 不做业务逻辑
+    ↓
+Worker 线程池
+    ↓ 执行业务逻辑（CallMethod）
+       执行完后回调给对应 EventLoop 发送响应
+```
 
 ### RpcClosesure  
+没做什么封装
 
 ### RpcChannel和RpcAsyncChannel  
 流程：connect - encode - write - read - decode
+
+最主要的是 CallMethod 方法，继承自google::protobuf::RpcChannel  
+Stub需要用channel作为参数初始化，后续调用对应的func会自动转到这里的CallMethod。
+
+这里是同步调用，把request转换成req_protocol，response 转换成 rsp_protocol，然后调用 connect，
+在connect的回调里调用write/read。
+
+目前是主线程负责业务+从线程执行EventLoop的模式，主线程同步执行任务、执行回调，从线程收发消息。
+
+为什么要用`std::enable_shared_from_this<RpcChannel>` ，因为回调捕获的变量使用时间不一定，  
+对于成员变量要么捕获副本要么捕获this指针，但是指针很危险，因为随时可能被析构，导致指针空悬  
+所以用shared_ptr包裹防止其析构。
+
+不足：仍然要写回调， 要想办法封装一下 closure，写一个自动代码生成器，给类再包装一层，  
+调用 `orderService.make_order(request, response)` 使用 future/promise 或协程 获取结果
+```c++
+void RpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
+                    google::protobuf::RpcController* controller, const google::protobuf::Message* request,
+                    google::protobuf::Message* response, google::protobuf::Closure* done){
+    std::shared_ptr<TinyPBProtocol> req_protocol = std::make_shared<TinyPBProtocol>();
+    
+    RpcController* m_controller = dynamic_cast<RpcController*>(controller);
+    if(m_controller == NULL){
+        ERRORLOG("failed callmethod, RpcController convert error");
+        return;
+    }
+
+    if(m_controller->getMsgId().empty()){
+        req_protocol->msg_id_ = MsgIDUtil::GenMsgID();
+        m_controller->setMsgId(req_protocol->msg_id_);
+    }else{
+        req_protocol->msg_id_ = m_controller->getMsgId();
+    }
+
+    req_protocol->method_name_ = method->full_name();
+    INFOLOG("[%s] | call method name [%s]", req_protocol->msg_id_.c_str(), req_protocol->method_name_.c_str());
+
+    if(!is_init_){
+        std::string err_info = "RpcChannel not init";
+        m_controller->setError(ERROR_CHANNEL_INIT, err_info);
+        ERRORLOG("%s | %s", req_protocol->msg_id_.c_str(), err_info.c_str());
+        return ;
+    }
+
+    
+    if(!request->SerializeToString(&req_protocol->pb_data_)){
+        std::string err_info = "failed to serialize";
+        m_controller->setError(ERROR_FAILED_SERIALIZE, err_info);
+        ERRORLOG("%s | %s, origin request [%s]", req_protocol->msg_id_.c_str(), err_info.c_str(), request->ShortDebugString().c_str());
+        return ;
+    }
+
+    s_ptr channel = shared_from_this();
+
+    timer_event_ = std::make_shared<TimerEvent>(m_controller->getTimeOut(), false, [m_controller, channel]() mutable->void{
+        m_controller->StartCancel();
+        m_controller->setError(ERROR_FAILED_SERIALIZE, "rpc call timeout " + std::to_string(m_controller->getTimeOut()));
+    
+        if(channel->getClosure()){
+            channel->getClosure()->Run();
+        }
+        channel.reset();
+        
+    });
+
+    client_->addTimerEvent(timer_event_);
+    
+    client_->connect([req_protocol, channel]()->void{
+
+        RpcController* m_controller =  dynamic_cast<RpcController*>(channel->getController());
+
+        if(channel->getTcpClient()->getConnectErrorCode() != 0) {
+            ERRORLOG("%s | connect error, error code[%d], error info[%s], peer addr[%s]", 
+                req_protocol->msg_id_.c_str(), channel->getTcpClient()->getConnectErrorCode(), 
+                channel->getTcpClient()->getConnectErrorInfo().c_str(), channel->getTcpClient()->getPeerAddr()->toString().c_str());
+            m_controller->setError(channel->getTcpClient()->getConnectErrorCode(), channel->getTcpClient()->getConnectErrorInfo());
+            return;
+        }
+
+        channel->getTcpClient()->writeMessage(req_protocol, [req_protocol, channel](AbstractProtocol::s_ptr)->void{
+            INFOLOG("%s | send request success, callmethod name[%s], origin request[%s], local_addr_[%s]", 
+                req_protocol->msg_id_.c_str(), req_protocol->method_name_.c_str(), channel->getRequest()->ShortDebugString().c_str(),
+                channel->getTcpClient()->getLocalAddr()->toString().c_str());
+            
+            channel->getTcpClient()->readMessage(req_protocol->msg_id_, [channel](AbstractProtocol::s_ptr msg) mutable ->void{
+                std::shared_ptr<TinyPBProtocol> rsp_protocol = std::dynamic_pointer_cast<TinyPBProtocol>(msg);
+                
+                // 取消定时任务
+                channel->getTimerEvent()->setCanceled(true);
+
+                RpcController* m_controller =  dynamic_cast<RpcController*>(channel->getController());
+                if(!channel->getResponse()->ParseFromString(rsp_protocol->pb_data_)){
+                    ERRORLOG("serialize error");
+                    m_controller->setError(ERROR_FAILED_DESERIALIZE, "deserialize error");
+                    return;
+                }
+
+                INFOLOG("%s | success get rpc response, callmethod name[%s], origin request[%s]", 
+                    rsp_protocol->msg_id_.c_str(), rsp_protocol->method_name_.c_str(), channel->getResponse()->ShortDebugString().c_str());
+        
+                if(rsp_protocol->err_code_ != 0){
+                    ERRORLOG("%s | call rpc method[%s] failed, error code[%d], err info[%s]", 
+                        rsp_protocol->err_code_, rsp_protocol->method_name_.c_str(), rsp_protocol->err_info_.c_str());
+                    m_controller->setError(rsp_protocol->err_code_, rsp_protocol->err_info_);
+                }
+
+                if(!channel->getController()->IsCanceled() && channel->closure_){
+                    channel->closure_->Run();
+                }
+
+                channel.reset();
+            });
+        });
+
+    });
+}
+```
+
 
 # 项目完善
 日志完善和优化  
@@ -2419,217 +1318,6 @@ service->CallMethod(method, &controller, req_msg, rsp_msg, NULL);
 项目构建与测试  
 
 # 测试
-## log
-``` c++
-#include "config.h"
-#include "log.h"
-#include <cstddef>
-#include <pthread.h>
-#include <string>
-
-void *func(void*){
-    int i = 100;
-    while (i --){
-        DEBUGLOG("this is thread in %s", "func");
-        INFOLOG("this is thread in %s", "func");
-        ERRORLOG("this is thread in %s", "func");
-    }
-
-    return NULL;
-}
-
-int main(){
-
-    lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
-    lrpc::Logger::SetGlobalLogger();
-
-    pthread_t thread;
-    pthread_create(&thread, NULL, func, NULL);
-
-    int i = 100;
-    while (i --){ 
-        DEBUGLOG("test debug log %s", std::to_string(i).c_str());
-        INFOLOG("test info log %s", std::to_string(i).c_str());
-        ERRORLOG("test error log %s", std::to_string(i).c_str());
-    }
-    pthread_join(thread, NULL);
-
-    return 0;
-}
-```
-## eventloop
-``` c++
-#include "config.h"
-#include "fd_event.h"
-#include "lrpc/net/eventloop.h"
-#include "lrpc/common/log.h"
-#include <strings.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
-int main(){
-    lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
-    lrpc::Logger::SetGlobalLogger();
-
-    lrpc::EventLoop* eventloop = new lrpc::EventLoop();
-
-    int listenfd = socket(AF_INET, SOCK_STREAM, 0);
-    if(listenfd == -1){
-        ERRORLOG("listenfd = -1");
-        exit(0);
-    }
-
-    sockaddr_in addr;
-    bzero(&addr, sizeof(addr));
-
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(12345);
-    addr.sin_addr.s_addr = INADDR_ANY;
-
-    int rt = bind(listenfd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-    if(rt == -1){
-        ERRORLOG("bind error");
-        exit(1);
-    }
-    
-    rt = listen(listenfd, 100);
-    if(rt == -1){
-        ERRORLOG("listen error");
-        exit(1);
-    }
-
-    lrpc::FdEvent event(listenfd, "(port:12345)");
-    event.listen(lrpc::IN_EVENT, [listenfd]()->void{
-        sockaddr_in peer_addr;
-        socklen_t addr_len = sizeof(peer_addr);
-
-        bzero(&peer_addr, sizeof(peer_addr));
-        int clientfd = accept(listenfd, reinterpret_cast<sockaddr*>(&peer_addr), &addr_len);
-        clientfd += 0;
-
-        DEBUGLOG("success get client [%s:%d]", inet_ntoa(peer_addr.sin_addr), ntohs(peer_addr.sin_port));
-
-    }); {}
-
-    eventloop->addEpollEvent(&event);
-
-    eventloop->loop();
-
-    return 0;
-}
-```
-## tcp_server
-```c++
-#include "lrpc/common/log.h"
-#include "lrpc/common/config.h"
-#include "lrpc/net/tcp/net_addr.h"
-#include "lrpc/net/tcp/tcp_server.h"
-#include <memory>
-#include <sys/socket.h>
-
-void test_tcpServer(){
-    lrpc::IPNetAddr::s_ptr addr = std::make_shared<lrpc::IPNetAddr>("127.0.0.1", 12345);
-    
-    lrpc::TcpServer tcp_server(addr);
-    tcp_server.start();
-}
-
-int main(){
-    lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
-    lrpc::Logger::SetGlobalLogger();
-
-    test_tcpServer();
-    return 0;
-}
-```
-
-## tcp_client
-```c++
-#include "lrpc/common/log.h"
-#include "lrpc/common/config.h"
-#include "lrpc/net/tcp/net_addr.h"
-#include "lrpc/net/tcp/tcp_connection.h"
-#include "lrpc/net/coder/string_coder.h"
-#include "lrpc/net/tcp/tcp_client.h"
-#include <arpa/inet.h>
-#include <memory>
-#include <netinet/in.h>
-#include <strings.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
-void test_connect(){
-    // 调用connect连接server
-    // write 一个字符串
-    // 等待 read 返回结果
-
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-
-    if(fd < 0){
-        ERRORLOG("invalid fd %d", fd);
-        exit(0);
-    }
-
-    sockaddr_in server_addr;
-    bzero(&server_addr, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(12345);
-    inet_aton("127.0.0.1", &server_addr.sin_addr); 
-
-    int rt = connect(fd, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr));
-
-    std::string msg = "hello";
-
-    rt = write(fd, msg.c_str(), msg.length());
-
-    DEBUGLOG("success write %d bytes, [%s]",rt, msg.c_str());
-
-
-    char buf[100];
-    rt = read(fd, buf, 100);
-    DEBUGLOG("success read %d bytes, [%s]", rt , std::string(buf).c_str());
-}
-
-void test_client(){
-    lrpc::IPNetAddr::s_ptr addr = std::make_shared<lrpc::IPNetAddr>("127.0.0.1", 12345);
-    lrpc::TcpClient client(addr);
-    
-
-    
-    client.connect([addr, &client]()->void{
-        {}
-        DEBUGLOG("{tcp_client connect 回调} connect to [%s] success", addr->toString().c_str());
-        
-        std::shared_ptr<lrpc::StringProtocol> message = std::make_shared<lrpc::StringProtocol>("12345", "hello lrpc");
-        
-        client.writeMessage(message, [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
-            DEBUGLOG("client write message success, msg_id=[%s]", msg_ptr->msg_id_.c_str());
-        });
-
-        client.readMessage("12345", [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
-            std::shared_ptr<lrpc::StringProtocol> message = std::dynamic_pointer_cast<lrpc::StringProtocol>(msg_ptr);
-            DEBUGLOG("client read message success, msg_id=[%s], msg=[%s]", 
-                message->msg_id_.c_str(), message->msg_.c_str()
-            );
-        });
-
-        client.writeMessage(message, [](lrpc::AbstractProtocol::s_ptr msg_ptr)->void{
-            DEBUGLOG("client write message success, msg_id=[%s]", msg_ptr->msg_id_.c_str());
-        });
-    });
-}
-
-int main(){
-    lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
-    lrpc::Logger::SetGlobalLogger();
-
-    // test_connect();
-    test_client();
-
-    return 0;
-}
-```
 
 # 结语
 实现了一个轻量级C++ RPC框架，基于 Reactor 架构，单机可达100KQPS。项目参考了muduo 网络框架，包含代码生成工具、异步日志。通过本项目我熟悉了RPC通信原理，Reactor 架构，Linux 下后台开发知识。

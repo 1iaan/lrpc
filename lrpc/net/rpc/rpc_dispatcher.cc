@@ -61,7 +61,7 @@ void RpcDispatcher::dispatch(AbstractProtocol::s_ptr request, AbstractProtocol::
         }
         return;
     }
-    INFOLOG("[%s] | get rpc request[%s]", req_protocol->msg_id_.c_str(), req_msg->ShortDebugString().c_str());
+    INFOLOG("[RpcDisPatcher] [%s] | get rpc request[%s]", req_protocol->msg_id_.c_str(), req_msg->ShortDebugString().c_str());
 
     google::protobuf::Message* rsp_msg = service->GetResponsePrototype(method).New();
 
@@ -88,7 +88,7 @@ void RpcDispatcher::dispatch(AbstractProtocol::s_ptr request, AbstractProtocol::
 
     rsp_protocol->err_code_ = 0;
 
-    INFOLOG("[%s] | dispatch success, request[%s], response[%s]",req_protocol->msg_id_.c_str(), req_msg->ShortDebugString().c_str(), rsp_msg->ShortDebugString().c_str());
+    INFOLOG("[RpcDisPatcher] [%s] | dispatch success, request[%s], response[%s]",req_protocol->msg_id_.c_str(), req_msg->ShortDebugString().c_str(), rsp_msg->ShortDebugString().c_str());
     if(req_msg){
         delete req_msg;
         req_msg = NULL;
@@ -117,7 +117,7 @@ bool RpcDispatcher::parseServiceFullName(const std::string& full_name, std::stri
     service_name = full_name.substr(0, i);
     method_name = full_name.substr(i+1, full_name.length() - i - 1);
 
-    INFOLOG("parse service_name[%s], and method_name[%s] from full name [%s]",service_name.c_str(), method_name.c_str(), full_name.c_str());
+    INFOLOG("[RpcDispatcher] parse service_name[%s], and method_name[%s] from full name [%s]",service_name.c_str(), method_name.c_str(), full_name.c_str());
     return true;
 }
 

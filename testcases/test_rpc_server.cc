@@ -29,8 +29,14 @@ class OrderImpl : public OrderService{
                        const ::queryOrderRequest* request,
                        ::queryOrderResponse* response,
                        ::google::protobuf::Closure* done){
-
-                       }
+        if(request->order_id() != "1999"){
+            response->set_order_id("1999");
+            response->set_price(1000);
+            response->set_goods("apple");
+        }else {
+            response->set_res_info("no goods");
+        }
+    }
 };
 
 void test_tcpServer(){

@@ -3,6 +3,7 @@
 #include "lrpc/net/tcp/tcp_client.h"
 #include "lrpc/net/fd_event.h"
 #include "lrpc/net/fd_event_group.h"
+#include "lrpc/net/io_thread.h"
 #include "lrpc/net/tcp/net_addr.h"
 #include <cerrno>
 #include <memory>
@@ -14,7 +15,9 @@
 namespace lrpc {
 
 TcpClient::TcpClient(NetAddr::s_ptr peer_addr):peer_addr_(peer_addr){
-    event_loop_ = EventLoop::GetCurEventLoop();
+    // event_loop_ =
+    io_thread_ = new IOThread(); 
+    event_loop_ = io_thread_->getEventloop();
     fd_ = socket(peer_addr->getFamily(), SOCK_STREAM, 0);
 
     if(fd_ < 0){
@@ -30,6 +33,7 @@ TcpClient::TcpClient(NetAddr::s_ptr peer_addr):peer_addr_(peer_addr){
 }
 
 TcpClient::~TcpClient(){
+    DEBUGLOG("~TcpClient");
     if(fd_ > 0){
         close(fd_);
     }
@@ -53,10 +57,9 @@ void TcpClient::connect(std::function<void()> callback){
                 [this, callback]()->void{
                     int rt = ::connect(fd_, peer_addr_->getSockAddr(), peer_addr_->getSockLen());
                     if((rt < 0 && errno == EISCONN) || rt == 0){
+                        initLocalAddr();
+                        connection_->setState(TcpConnection::Connected);
                         DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
-                            initLocalAddr();
-                            connection_->setState(TcpConnection::Connected);
-                            DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
                     }else{
                         if(errno == ECONNREFUSED){
                             connect_error_code_ = ERROR_PEER_CLOSED;
@@ -67,6 +70,10 @@ void TcpClient::connect(std::function<void()> callback){
                         }
                         ERRORLOG("connect error, errno=%d, error=%s", errno, strerror(errno));
 
+                        if(callback){
+                            callback();
+                        }
+                        
                         close(fd_);
                         fd_ = socket(peer_addr_->getFamily(), SOCK_STREAM, 0);
                     }
@@ -78,33 +85,11 @@ void TcpClient::connect(std::function<void()> callback){
                     }
                 }
             );
-
-            // fd_event_->listen(FdEvent::OUT_EVENT, [this, callback]()->void{
-            //     {}
-            //     int err = 0;
-            //     socklen_t len = sizeof(err);
-            //     getsockopt(fd_, SOL_SOCKET, SO_ERROR, &err, &len);
-            //     if(err == 0){
-            //         initLocalAddr();
-            //         connection_->setState(TcpConnection::Connected);
-            //         DEBUGLOG("connect [%s] success", peer_addr_->toString().c_str());
-            //     } else {
-            //         connect_error_code_ = ERROR_FAILED_CONNECT;
-            //         connect_error_info_ = "connect error, sys error = " + std::string(strerror(errno));
-            //         ERRORLOG("connect error, errno=%d, error=%s", err, strerror(errno));
-            //     }
-            //     // 连接完成去掉可写事件监听，否则会一直除法
-            //     DEBUGLOG("去掉可写事件监听");
-            //     fd_event_->cancel(FdEvent::OUT_EVENT);
-            //     event_loop_->addEpollEvent(fd_event_);
-
-            //     // 连接成功才执行回调
-            //     if(callback) callback();
-            // });
             
             event_loop_->addEpollEvent(fd_event_);
             if(!event_loop_->isLooping()) {
-                event_loop_->loop();
+                io_thread_->start();
+                // event_loop_->loop();
             }
 
         } else {
@@ -166,6 +151,7 @@ void TcpClient::initLocalAddr(){
     }
    
     local_addr_ = std::make_shared<IPNetAddr>(local_addr);
+    // DEBUGLOG("------local addr [%s]", local_addr_->toString().c_str());
 }
 
 void TcpClient::addTimerEvent(TimerEvent::s_ptr timer_event){

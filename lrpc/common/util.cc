@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <unistd.h>
@@ -31,6 +32,23 @@ int64_t get_now_ms(){
     timeval time;
     gettimeofday(&time, NULL);
     return time.tv_sec * 1000 + time.tv_usec / 1000;
+}
+
+std::string get_now_str(){
+struct timeval now_time;
+    gettimeofday(&now_time, nullptr);
+    
+    struct tm now_time_t;
+    localtime_r(&(now_time.tv_sec), &now_time_t);
+
+    char buf[128];
+    strftime(&buf[0], 128, "%y-%m-%d %H:%M:%S", &now_time_t);
+    
+    char ms_buf[8];
+    int ms = now_time.tv_usec / 1000;
+    snprintf(ms_buf, sizeof(ms_buf), ".%03d", ms);
+    
+    return std::string(buf) + ms_buf;
 }
 
 // long 32 4B

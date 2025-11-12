@@ -28,7 +28,7 @@ namespace lrpc{
  */
 Timer::Timer(): FdEvent(timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC), "TIMER"){
     
-    INFOLOG("[Timer] timer init,\t fd=%d", getFd());
+    // DEBUGLOG("[Timer] timer init,\t fd=%d", getFd());
 
     // 把fd的可读事件放到event上监听
     listen(FdEvent::IN_EVENT, std::bind(&Timer::onTimer, this));
@@ -93,7 +93,7 @@ void Timer::onTimer(){
     // 执行定时任务
     int64_t now = get_now_ms();
     std::vector<TimerEvent::s_ptr> tmps;
-    std::vector<std::pair<uint64_t, std::function<void()>>> tasks;
+    // std::vector<std::pair<uint64_t, std::function<void()>>> tasks;
 
     ScopeMutex<Mutex> lock(mutex_);
     auto it = events_.begin();
@@ -103,7 +103,7 @@ void Timer::onTimer(){
         if((*it).second->getArriveTime() <= now ){
             if(!(*it).second->isCanceled()){
                 tmps.emplace_back((*it).second);
-                tasks.emplace_back(std::make_pair((*it).second->getArriveTime(), (*it).second->getCallBack()));
+                // tasks.emplace_back(std::make_pair((*it).second->getArriveTime(), (*it).second->getCallBack()));
             }
         // 没有到期说明后面的也没到期
         } else {
@@ -122,11 +122,16 @@ void Timer::onTimer(){
         }
     }
 
-    DEBUGLOG("Ontimer trigger event size %d:%d", tmps.size(), tasks.size());
+    DEBUGLOG("Ontimer trigger event size %d", tmps.size());
     resetArriveTime();
 
-    for(auto p = tasks.begin(); p != tasks.end(); ++p){
-        if(p->second) p->second();
+    // for(auto p = tasks.begin(); p != tasks.end(); ++p){
+    //     if(p->second) p->second();
+    // }
+    for(auto &e : tmps){
+        if(auto cb = e->getCallBack()) {
+            cb();
+        }
     }
 }
 

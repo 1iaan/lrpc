@@ -41,11 +41,11 @@ void TcpServer::init(){
     DEBUGLOG("---------- tcpServer io_thread_group create ----------");
     io_thread_group_ = new IOThreadGroup(2);
 
-    listen_fd_event_ = new FdEvent(acceptor_->getListenFd(), "监听主循环事件");
+    listen_fd_event_ = new FdEvent(acceptor_->getListenFd(), "Acceptor");
     listen_fd_event_->listen(FdEvent::IN_EVENT, std::bind(&TcpServer::onAccept, this));
 
     main_event_loop_->addEpollEvent(listen_fd_event_);
-    DEBUGLOG("----------        tcpServer init over        ----------");
+    DEBUGLOG("----------       tcpServer init over        ----------");
 }
 
 // 有一个新连接来了， maineventloop处理，添加到 iothreadgroup中

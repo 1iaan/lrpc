@@ -1,4 +1,5 @@
 #pragma once
+#include "lrpc/net/io_thread.h"
 #include "lrpc/net/tcp/net_addr.h"
 #include "lrpc/net/tcp/tcp_connection.h"
 #include "lrpc/net/eventloop.h"
@@ -41,17 +42,18 @@ public:
     void initLocalAddr();
 
     void addTimerEvent(TimerEvent::s_ptr timer_event);
+
+    void join() { io_thread_->join(); }
 private:
-    NetAddr::s_ptr peer_addr_;
-    NetAddr::s_ptr local_addr_;
-    EventLoop* event_loop_{NULL};
-
-    int fd_{-1};
-    FdEvent* fd_event_{NULL};
-    TcpConnection::s_ptr connection_{NULL};
-
-    int connect_error_code_{0};
-    std::string connect_error_info_;
+    NetAddr::s_ptr peer_addr_;              // 对端
+    NetAddr::s_ptr local_addr_;             // 本地
+    EventLoop* event_loop_{NULL};           // event_loop
+    IOThread* io_thread_{NULL};
+    int fd_{-1};                            // connection 的 fd
+    FdEvent* fd_event_{NULL};               // connection 的 fd_event
+    TcpConnection::s_ptr connection_{NULL}; // 连接
+    int connect_error_code_{0};             // 错误码
+    std::string connect_error_info_;        // 错误信息
 };
 
 } // namespace lrpc

@@ -49,18 +49,4 @@ public:
 };
 
 
-class WakeUpFdEvent : public FdEvent{
-public:
-    WakeUpFdEvent(int fd);
-
-    ~WakeUpFdEvent();
-
-public:
-    void wakeup();
-
-private:
-
-};
-
-
 } // namespace lrpc

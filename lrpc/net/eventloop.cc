@@ -2,6 +2,7 @@
 #include "lrpc/common/log.h"
 #include "lrpc/common/util.h"
 #include "lrpc/net/fd_event.h"
+#include "lrpc/net/wakeup_fd_event.h"
 #include <cerrno>
 #include <cstddef>
 #include <string.h>
@@ -21,11 +22,12 @@
     epoll_event tmp = event->getEpollEvent();   \
     int rt = epoll_ctl(epoll_fd_, op, event->getFd(), &tmp);    \
     if(rt == -1){   \
-        ERRORLOG("faild epoll_ctl when add fd [%d:%s], errno=%d, errno=%s", event->getFd(), event->getFdName().c_str(), errno, strerror(errno)); \
+        ERRORLOG("failed epoll_ctl when add/mod fd [%d:%s], errno=%d, errno=%s", event->getFd(), event->getFdName().c_str(), errno, strerror(errno)); \
     } else {  \
         listen_fds_.insert(event->getFd()); \
     } \
-    DEBUGLOG("eventloop [%d] add event success, fd [%d:%s], event [%u]", tid_,  event->getFd(), event->getFdName().c_str(), tmp); \
+    if(op == EPOLL_CTL_MOD) { DEBUGLOG("eventloop [%d] mod event success, fd [%d:%s], event [%u]", tid_,  event->getFd(), event->getFdName().c_str(), tmp.events); } \
+    else { DEBUGLOG("eventloop [%d] add event success, fd [%d:%s], event [%u]", tid_,  event->getFd(), event->getFdName().c_str(), tmp.events); }\
 
 #define DEL_TO_EPOLL() \
     auto it = listen_fds_.find(event->getFd()); \
@@ -40,13 +42,21 @@
     }else { \
         listen_fds_.erase(event->getFd()); \
     } \
-    DEBUGLOG("eventloop [%d] delete event success, fd [%d:%s], event [%u]", tid_ , event->getFd(), event->getFdName().c_str(), tmp); \
+    DEBUGLOG("eventloop [%d] delete event success, fd [%d:%s], event [%u]", tid_ , event->getFd(), event->getFdName().c_str(), tmp.events); \
 
 namespace lrpc{
 
 static thread_local EventLoop* t_cur_eventloop = NULL;
 static int g_epoll_max_timeout = 10000;
 static const int g_epoll_max_event = 10;
+
+
+EventLoop* EventLoop::GetCurEventLoop(){
+    if(!t_cur_eventloop){
+        t_cur_eventloop = new EventLoop();
+    }   
+    return t_cur_eventloop;
+}
 
 EventLoop::EventLoop(){
     INFOLOG("[Eventloop] Start create");
@@ -93,7 +103,7 @@ void EventLoop::initWakeUpFdEvent(){
             while(read(wakeup_fd_, buf, 8) != -1 && errno != EAGAIN){
 
             }
-            DEBUGLOG("read full bytes from wakeup fd[%d]", wakeup_fd_);
+            DEBUGLOG("read full bytes from wakeup fd[%d:%s]", wakeup_fd_, wakeup_fd_event_->getFdName().c_str());
         }
     );
     addEpollEvent(wakeup_fd_event_);
@@ -156,10 +166,10 @@ void EventLoop::loop(){
             }
 
         }
-        DEBUGLOG("epoll loop rt %d", rt);
+        // DEBUGLOG("epoll loop rt %d", rt);
     }
 
-    DEBUGLOG("eventloop [%d] stop", tid_);
+    INFOLOG("[EventLoop] eventloop [%d] stop", tid_);
 }
 
 void EventLoop::wakeup(){
@@ -213,13 +223,6 @@ void EventLoop::addTask(std::function<void()> callback,  bool is_wake_up /*=fals
 
 void EventLoop::addTimerEvent(TimerEvent::s_ptr event){
     timer_->addTimerEvent(event);
-}
-
-EventLoop* EventLoop::GetCurEventLoop(){
-    if(!t_cur_eventloop){
-        t_cur_eventloop = new EventLoop();
-    }   
-    return t_cur_eventloop;
 }
 
 } // namespace lrpc
