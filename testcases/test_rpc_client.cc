@@ -12,6 +12,8 @@
 #include <arpa/inet.h>
 #include <memory>
 #include <netinet/in.h>
+#include <semaphore.h>
+#include <string>
 #include <strings.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -60,34 +62,37 @@ void test_client(){
 }
 
 void makeOrder(lrpc::RpcChannel::s_ptr channel){
-    NEWMESSAGE(makeOrderRequest, request);
-    NEWMESSAGE(makeOrderResponse, response);
-    request->set_price(100);
-    request->set_goods("computer");
+    for(int i = 0;i < 1000; ++i) {
+        NEWMESSAGE(makeOrderRequest, request);
+        NEWMESSAGE(makeOrderResponse, response);
+        request->set_price(100*i);
+        request->set_goods("computer");
 
-    NEWRPCCONTROLLER(controller);
-    controller->setMsgId("1");
-    controller->setTimeOut(10000);
+        NEWRPCCONTROLLER(controller);
+        controller->setMsgId(std::to_string(i));
+        controller->setTimeOut(1000000);
 
-    std::shared_ptr<lrpc::RpcClousre> closure = std::make_shared<lrpc::RpcClousre>([request, response, channel, controller]() mutable ->void{
-        if(controller->getErrorCode() != 0){
-            ERRORLOG("[%s] | call rpc failed, req[%s], error code[%d], error info[%s]",
-                controller->getMsgId().c_str(),
-                request->ShortDebugString().c_str(), 
-                controller->getErrorCode(), 
-                controller->getErrorInfo().c_str()
-            );
-            channel->getTcpClient()->stop();
-            channel.reset();
-        }else{
-            INFOLOG("[%s] | call rpc success, req[%s], res[%s]", 
-                controller->getMsgId().c_str(),
-                request->ShortDebugString().c_str(), response->ShortDebugString().c_str());
-            // 业务逻辑
-        }
-    });
+        std::shared_ptr<lrpc::RpcClousre> closure = std::make_shared<lrpc::RpcClousre>([request, response, channel, controller]() mutable ->void{
+            if(controller->getErrorCode() != 0){
+                ERRORLOG("[%s] | call rpc failed, req[%s], error code[%d], error info[%s]",
+                    controller->getMsgId().c_str(),
+                    request->ShortDebugString().c_str(), 
+                    controller->getErrorCode(), 
+                    controller->getErrorInfo().c_str()
+                );
+                channel->getTcpClient()->stop();
+                channel.reset();
+            }else{
+                INFOLOG("[%s] | call rpc success, req[%s], res[%s]", 
+                    controller->getMsgId().c_str(),
+                    request->ShortDebugString().c_str(), response->ShortDebugString().c_str());
+                // 业务逻辑
+            }
+        });
 
-    CALLRPC(channel, make_order, controller, request, response, closure);
+        CALLRPC(OrderService_Stub, channel, make_order, controller, request, response, closure);
+        // sleep(5);
+    }
 }
 
 void queryOrder(lrpc::RpcChannel::s_ptr channel){
@@ -118,7 +123,7 @@ void queryOrder(lrpc::RpcChannel::s_ptr channel){
 
     });
 
-    CALLRPC(channel, query_order, controller, request, response, closure);
+    CALLRPC(OrderService_Stub, channel, query_order, controller, request, response, closure);
 }
 
 void test_channel(){
@@ -135,9 +140,10 @@ void test_channel(){
     // OrderService_Stub stub(channel.get());
     // stub.make_order(controller.get(), request.get(), response.get(), closure.get());
 
+
     makeOrder(channel);
 
-    queryOrder(channel);
+    // queryOrder(channel);
     
     channel->getTcpClient()->join();
     channel->getTcpClient()->stop();

@@ -1,4 +1,5 @@
 #include "lrpc/common/log.h"
+#include "lrpc/common/mutex.h"
 #include "lrpc/net/coder/tinypb_coder.h"
 #include "lrpc/net/coder/tinypb_protocol.h"
 #include "lrpc/net/fd_event.h"
@@ -137,6 +138,8 @@ void TcpConnection::execute(){
         DEBUGLOG("encode protocol to buffer");
         coder_->encode(response_messages, out_buffer);
         DEBUGLOG("encode complete");
+
+        // INFOLOG("listen write %d", response_messages.size());
         listenWrite();
     }
     // 客户端逻辑，对端是服务端
@@ -162,6 +165,13 @@ void TcpConnection::onWrite(){
         return ;
     }
 
+    ScopeMutex<Mutex> lock(mutex_);
+    std::vector<
+        std::pair<AbstractProtocol::s_ptr, std::function<void(AbstractProtocol::s_ptr)>>
+    > tmp = write_callbacks_;
+    write_callbacks_.clear();
+    lock.unlock();
+
     // 客户端，对端是服务端
     // 1. 编码message到outbuffer
     if (connection_type_ == ServerConnectionByClient){
@@ -170,8 +180,8 @@ void TcpConnection::onWrite(){
         // 2. 将 字节流写入到 buffer，全部发送
 
         std::vector<AbstractProtocol::s_ptr> messages;
-        for(size_t i = 0;i < write_callbacks_.size(); ++ i){
-            messages.push_back(write_callbacks_[i].first);
+        for(size_t i = 0;i < tmp.size(); ++ i){
+            messages.push_back(tmp[i].first);
         }
         coder_->encode(messages, out_buffer);
     }
@@ -187,8 +197,9 @@ void TcpConnection::onWrite(){
         int write_size = out_buffer->readable();
         int read_index = out_buffer->getReadIdx();
         int rt = write(fd_, &out_buffer->buffer_[read_index], write_size);
-
+        if(rt > 0) out_buffer->moveReadIndex(write_size);
         if(rt >= write_size){
+            INFOLOG("send all data to client [%s]", peer_addr_->toString().c_str());
             DEBUGLOG("send all data to client [%s]", peer_addr_->toString().c_str());
             is_write_all = true;
             break;
@@ -201,18 +212,18 @@ void TcpConnection::onWrite(){
         }
     }
     // 3. 如果全部发送完成，取消可写事件监听
-    if(is_write_all){
+    if(is_write_all && write_callbacks_.empty()){
         fd_event_->cancel(FdEvent::OUT_EVENT);
         event_loop_->addEpollEvent(fd_event_);
     }
 
     // 4. 为客户端，对端是服务端，执行回调函数
     if(connection_type_ == ServerConnectionByClient){
-        for(size_t i = 0;i < write_callbacks_.size(); ++ i){
-            write_callbacks_[i].second(write_callbacks_[i].first);
+        for(size_t i = 0;i < tmp.size(); ++ i){
+            tmp[i].second(tmp[i].first);
         }
     }
-    write_callbacks_.clear(); 
+    tmp.clear(); 
 }
 
 void TcpConnection::clear(){
@@ -256,10 +267,12 @@ void TcpConnection::listenWrite(){
 }
 
 void TcpConnection::pushSendMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback){
+    ScopeMutex<Mutex> lock(mutex_);
     write_callbacks_.push_back(std::make_pair(message, callback));
 }
 
 void TcpConnection::pushReadMessage(std::string msg_id, std::function<void(AbstractProtocol::s_ptr)> callback){
+    ScopeMutex<Mutex> lock(mutex_);
     read_callbacks_.insert(std::make_pair(msg_id, callback));
 }
 

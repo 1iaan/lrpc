@@ -1,4 +1,5 @@
 #include "lrpc/net/tcp/tcp_server.h"
+#include "lrpc/common/config.h"
 #include "lrpc/common/log.h"
 #include "lrpc/net/eventloop.h"
 #include "lrpc/net/fd_event.h"
@@ -11,6 +12,10 @@
 namespace lrpc{
 
 TcpServer::TcpServer(NetAddr::s_ptr local_addr):local_addr_(local_addr){
+    if(Config::GetGlobalConfig()){
+        io_thread_num_ = Config::GetGlobalConfig()->io_thread_num_;
+        worker_thread_num_ = Config::GetGlobalConfig()->worker_thread_num_;
+    }
     INFOLOG("[TcpServer] Start create");
     init();
     INFOLOG("[TcpServer] Success create on [%s]", local_addr->toString().c_str());
@@ -39,7 +44,7 @@ void TcpServer::init(){
     main_event_loop_ = EventLoop::GetCurEventLoop();
 
     DEBUGLOG("---------- tcpServer io_thread_group create ----------");
-    io_thread_group_ = new IOThreadGroup(2);
+    io_thread_group_ = new IOThreadGroup(io_thread_num_);
 
     listen_fd_event_ = new FdEvent(acceptor_->getListenFd(), "Acceptor");
     listen_fd_event_->listen(FdEvent::IN_EVENT, std::bind(&TcpServer::onAccept, this));

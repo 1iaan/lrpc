@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+option cc_generic_services = true;
+
+// 请求
+message PingRequest {
+    string msg = 1;
+}
+
+// 响应
+message PingResponse {
+    string reply = 1;
+}
+
+// 服务定义
+service PingService {
+    rpc ping (PingRequest) returns (PingResponse);
+}

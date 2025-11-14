@@ -31,7 +31,11 @@ private:
     FdEvent *listen_fd_event_{0};
     
     EventLoop* main_event_loop_{NULL};      // main reactor
+    
+    int io_thread_num_{2};
     IOThreadGroup* io_thread_group_{NULL};  // subReactor 组
+
+    int worker_thread_num_{2};
     
     std::unordered_set<TcpConnection::s_ptr> client_;
     int client_counts_{0};

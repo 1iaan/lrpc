@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lrpc/common/mutex.h"
 #include "lrpc/net/coder/abs_coder.h"
 #include "lrpc/net/fd_event.h"
 #include "lrpc/net/io_thread.h"
@@ -96,6 +97,8 @@ private:
     > read_callbacks_;
 
     AbstractCoder* coder_{NULL};
+
+    Mutex mutex_;
 };
 
 }   // namespace lrpc

@@ -65,7 +65,7 @@ void RpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
     INFOLOG("[%s] | call method name [%s]", req_protocol->msg_id_.c_str(), req_protocol->method_name_.c_str());
 
     if(pending_calls_.find(m_controller->getMsgId()) == pending_calls_.end()){
-        std::string err_info = "RpcChannel not init";
+        std::string err_info = "RpcChannel not init this call";
         m_controller->setError(ERROR_CHANNEL_INIT, err_info);
         ERRORLOG("%s | %s", req_protocol->msg_id_.c_str(), err_info.c_str());
         return ;
@@ -128,7 +128,6 @@ void RpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
         }
 
         channel->delPendingCall(rsp_protocol->msg_id_);
-        channel.reset();
     });
 }
 
@@ -171,4 +170,7 @@ void RpcChannel::addTimerEvent(std::string msg_id, TimerEvent::s_ptr event){
     pending_calls_[msg_id].timer = event;
 }
 
+void RpcChannel::stop(){
+    client_->stop();
+}
 } // namespace lrpc

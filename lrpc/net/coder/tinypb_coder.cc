@@ -33,7 +33,7 @@ void TinyPBCoder::encode(std::vector<AbstractProtocol::s_ptr>& messages, TcpBuff
 void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, TcpBuffer::s_ptr buffer){
     // 遍历Buffer，找到PB_START，找到后解析出长度，然后得到结束符的位置判断是否为PG_END
     while(true){
-        std::vector<char> tmp = buffer->buffer_;
+        std::vector<char> &tmp = buffer->buffer_;
         int start_index = buffer->getReadIdx();
         int end_index = -1;
 
@@ -44,12 +44,12 @@ void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, Tcp
         for(i = start_index;i < buffer->getWriteIdx(); ++ i){
             if(tmp[i] == TinyPBProtocol::PB_START){
                 // 取四个字节，由于是网络字节序需要转换
-                if(i + 1 < buffer->getWriteIdx()){
+                if(i + 1  < buffer->getWriteIdx()){
                     package_len = getInt32FromNetByte(&tmp[i+1]);
                     DEBUGLOG("GET packpage length = %d", package_len);
 
                     // 结束符索引
-                    int j = i + package_len -1;
+                    int j = i + package_len - 1;
                     // 结束符不存在， 说明只接受了半个包，跳过 i 会递增到末尾 然后退出循环
                     // 感觉可以直接退出? 
                     if(j >= buffer->getWriteIdx()){
@@ -72,7 +72,7 @@ void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, Tcp
         }
 
         if(parse_success){
-            buffer->moveReadIndex(end_index - start_index + 1);
+            // INFOLOG("start_idx[%d], end_idx[%d]", start_index, end_index);
 
             TinyPBProtocol::s_ptr message = std::make_shared<TinyPBProtocol>();
             message->package_len_ = package_len;
@@ -89,6 +89,11 @@ void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, Tcp
 
             int msg_id_index = msg_id_len_index + sizeof(message->msg_id_len_);
             char msg_id[100] = {0};
+            if(msg_id_index + message->msg_id_len_ > end_index){
+                message->parse_success_ = false;
+                ERRORLOG("parse error, msg_id data out of range");
+                continue;
+            }
             memcpy(&msg_id[0], &tmp[msg_id_index], message->msg_id_len_);
             message->msg_id_ = std::string(msg_id);
             DEBUGLOG("parse msg_id=%s", message->msg_id_.c_str());
@@ -105,6 +110,11 @@ void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, Tcp
 
             int method_name_index = method_name_len_index + sizeof(message->method_name_len_);
             char method_name[512] = {0};
+            if(method_name_index + message->method_name_len_ > end_index){
+                message->parse_success_ = false;
+                ERRORLOG("parse error, method_name data out of range");
+                continue;
+            }
             memcpy(&method_name[0], &tmp[method_name_index], message->method_name_len_);
             message->method_name_ = std::string(method_name);
             DEBUGLOG("parse method_name=%s", message->method_name_.c_str());
@@ -130,20 +140,35 @@ void TinyPBCoder::decode(std::vector<AbstractProtocol::s_ptr>& out_messages, Tcp
 
             int err_info_index = err_info_len_index + sizeof(message->err_info_len_);
             char err_info[512] = {0};
+            if(err_info_index + message->err_info_len_ > end_index){
+                message->parse_success_ = false;
+                ERRORLOG("parse error, err_info data out of range");
+                continue;
+            }
             memcpy(&err_info[0], &tmp[err_info_index], message->err_info_len_);
             message->err_info_ = std::string(err_info);
             DEBUGLOG("parse err_info=%s", message->err_info_.c_str());
 
             // pbdata
-            int pb_data_len = message->package_len_ - message->method_name_len_ - message->msg_id_len_ -
-                -message->err_info_len_ - 2 - 24;
-            
+            int pb_data_len = message->package_len_ 
+                            - message->method_name_len_ 
+                            - message->msg_id_len_ 
+                            - message->err_info_len_ 
+                            - 2 - 24;
+
             int pb_data_index = err_info_index + message->err_info_len_;
+            if(pb_data_len < 0 || pb_data_index + pb_data_len > end_index){
+                message->parse_success_ = false;
+                ERRORLOG("parse error, pb_data length invalid: %d", pb_data_len);
+                continue;
+            }
+
             message->pb_data_ = std::string(&tmp[pb_data_index], pb_data_len);
 
             // TODO: checksum
 
             message->parse_success_ = true;
+            buffer->moveReadIndex(end_index - start_index + 1);
 
             out_messages.push_back(message);
             DEBUGLOG("decode message[%s] success", message->msg_id_.c_str());
@@ -180,6 +205,7 @@ const char* TinyPBCoder::encodeTinyPB(TinyPBProtocol::s_ptr msg, int &len){
 
     if(!msg->msg_id_.empty()){
         memcpy(tmp, &msg->msg_id_[0], msg_id_len);
+        // INFOLOG("%s",tmp);
         tmp += msg_id_len;
     }
 
@@ -205,8 +231,8 @@ const char* TinyPBCoder::encodeTinyPB(TinyPBProtocol::s_ptr msg, int &len){
     tmp += sizeof(err_info_len_net);
 
     if(!msg->err_info_.empty()){
-        memcpy(tmp, &msg->err_info_[0], err_info_len_net);
-        tmp += err_info_len_net;
+        memcpy(tmp, &msg->err_info_[0], err_info_len);
+        tmp += err_info_len;
     }
 
     // pb_data
@@ -233,6 +259,8 @@ const char* TinyPBCoder::encodeTinyPB(TinyPBProtocol::s_ptr msg, int &len){
 
     DEBUGLOG("encode message[%s] success", msg->msg_id_.c_str());
     return buf;
+
 }
+
 
 }  // namespace lrpc

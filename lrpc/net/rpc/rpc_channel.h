@@ -22,12 +22,12 @@ namespace lrpc {
 #define NEWRPCCHANNEL(addr, var_name) \
     std::shared_ptr<lrpc::RpcChannel> var_name = std::make_shared<lrpc::RpcChannel>(std::make_shared<lrpc::IPNetAddr>(addr));  \
 
-#define CALLRPC(channel, method_name, controller, request, response, closure) \
-    {   \
-        channel->addPendingCall(controller, request, response, closure);  \
-        OrderService_Stub stub(channel.get());      \
-        stub.method_name(controller.get(), request.get(), response.get(), closure.get());    \
-    }   \
+#define CALLRPC(stub_type, channel, method_name, controller, request, response, closure) \
+    {                                                                                   \
+        (channel)->addPendingCall(controller, request, response, closure);              \
+        stub_type stub((channel).get());                                                \
+        stub.method_name((controller).get(), (request).get(), (response).get(), (closure).get()); \
+    }
 
 class RpcChannel : public google::protobuf::RpcChannel, public std::enable_shared_from_this<RpcChannel>{
 public:
@@ -45,18 +45,20 @@ public:
                         google::protobuf::Message* response, google::protobuf::Closure* done);
 
     void addPendingCall(controller_s_ptr controller, message_s_ptr req, message_s_ptr res, closure_s_ptr done);
+    
+    void delPendingCall(std::string msg_id);
 
     google::protobuf::RpcController* getController(std::string msg_id);
     google::protobuf::Message* getRequest(std::string msg_id);
     google::protobuf::Message* getResponse(std::string msg_id);
     google::protobuf::Closure* getClosure(std::string msg_id);
+    TcpClient* getTcpClient(){ return client_.get(); }
+    
     TimerEvent* getTimerEvent(std::string msg_id);
 
     void addTimerEvent(std::string msg_id, TimerEvent::s_ptr event);
 
-    void delPendingCall(std::string msg_id);
-
-    TcpClient* getTcpClient(){ return client_.get(); }
+    void stop();
 public:
     struct PendingCall {
         controller_s_ptr controller;

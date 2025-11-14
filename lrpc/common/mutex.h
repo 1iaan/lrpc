@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdio>
 #include <pthread.h>
 namespace lrpc {
 
@@ -24,12 +25,14 @@ public:
     void lock() {
         if(!is_lock_){
             mutex_.lock();
+            is_lock_ = true;
         }
     }
 
     void unlock(){
         if(is_lock_){
             mutex_.unlock();
+            is_lock_ = false;
         }
     }
 
@@ -49,6 +52,7 @@ public:
     }
 
     ~Mutex(){
+        printf("~Mutex\n");
         pthread_mutex_destroy(&mutex_);
     }
 

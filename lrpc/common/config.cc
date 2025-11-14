@@ -1,5 +1,6 @@
 #include "lrpc/common/config.h"
 #include <cstddef>
+#include <cstdlib>
 #include <tinyxml/tinyxml.h>
 
 namespace lrpc{
@@ -29,24 +30,45 @@ Config* Config::GetGlobalConfig(){
     return g_config;
 }
 
-Config::Config(const char* xmlfile){
+Config::Config(const char* xmlfile): xmlfile_(xmlfile){
     TiXmlDocument* xml_document = new TiXmlDocument();
-    bool rt = xml_document->LoadFile(xmlfile);
+    bool rt = xml_document->LoadFile(xmlfile_.c_str());
 
     if(!rt){
         printf("Start lrpc server error, failed to read config file %s, error info [%s]\n", xmlfile, xml_document->ErrorDesc());
         exit(0);
     }
-
+    
     READ_XML_NODE(root, xml_document);
+    
+    getLogConfig(root_node);
+
+    getThreadConfig(root_node);
+
+    printf("Config: \n");
+    printf("\tlog_level:[%s]\n", log_level_.c_str());
+    printf("\tio_thread_num:[%d]\n", io_thread_num_);
+    printf("\torker_thread_num:[%d]\n", worker_thread_num_);
+}
+
+void Config::getLogConfig(TiXmlElement* root_node){
     READ_XML_NODE(log, root_node);
 
     READ_STR_FROM_XML_NODE(log_level, log_node);
 
     log_level_ = log_level;
-    
-    printf("Config: \n");
-    printf("\tlog_level:\t[%s]\n", log_level_.c_str());
+}
+
+void Config::getThreadConfig(TiXmlElement* root_node){
+    READ_XML_NODE(thread, root_node)
+
+    READ_STR_FROM_XML_NODE(io_threads, thread_node);
+
+    io_thread_num_ = std::atoi(io_threads.c_str());
+
+    READ_STR_FROM_XML_NODE(worker_threads, thread_node);
+
+    worker_thread_num_ = std::atoi(worker_threads.c_str());
 }
 
 } // namespace lrpc

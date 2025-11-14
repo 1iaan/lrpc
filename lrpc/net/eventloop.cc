@@ -120,13 +120,15 @@ void EventLoop::loop(){
         /* 执行 tasks_  */
         ScopeMutex<Mutex> lock(mutex_);
         std::queue<std::function<void()>> tmp_tasks;
-        tasks_.swap(tmp_tasks);
+        tmp_tasks.swap(tasks_);
         lock.unlock();
 
         while(!tmp_tasks.empty()){
             auto cb = tmp_tasks.front();
             tmp_tasks.pop();
-            if(cb) cb();
+            if(cb) {
+                cb();
+            }
         }
 
         /* 如果有定时任务需要执行，在这里执行 */
@@ -212,9 +214,7 @@ bool EventLoop::isInLoopThread(){
 }
 
 void EventLoop::addTask(std::function<void()> callback,  bool is_wake_up /*=false*/){
-    ScopeMutex<Mutex> lock(mutex_);
     tasks_.push(callback);
-    lock.unlock();
 
     if(is_wake_up){
         wakeup();

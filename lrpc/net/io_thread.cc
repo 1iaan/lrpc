@@ -24,6 +24,7 @@ IOThread::IOThread(){
 }
 
 IOThread::~IOThread(){
+    ERRORLOG("~IOThread");
     if(eventloop_) eventloop_->stop();
     sem_destroy(&init_semaphore_);
     pthread_join(thread_, NULL);
