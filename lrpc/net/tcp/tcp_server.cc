@@ -68,6 +68,8 @@ void TcpServer::onAccept(){
     IOThread* io_thread = io_thread_group_->getIOThread();
     
     TcpConnection::s_ptr connection = std::make_shared<TcpConnection>(io_thread->getEventloop(), client_fd, 128, local_addr_, peer_addr, TcpConnection::ClientConnectionByServer);
+    connection->listenRead(); // 必须在这里调用？ 
+
     connection->setState(TcpConnection::Connected);
     client_.insert(connection);
     

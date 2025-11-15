@@ -48,6 +48,7 @@ void client_worker(int thread_id, int requests_per_thread) {
     }
 
     sem_wait(&loop_ok);
+    printf("channel stop\n");
     channel->stop();
     channel.reset();
 }
@@ -56,7 +57,7 @@ int main() {
     lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
     lrpc::Logger::SetGlobalLogger();
 
-    int thread_num = 1;
+    int thread_num = 2;
     int requests_per_thread = 1000;
 
     std::vector<std::thread> threads;

@@ -5,6 +5,7 @@
 #include "lrpc/net/wakeup_fd_event.h"
 #include <cerrno>
 #include <cstddef>
+#include <mutex>
 #include <string.h>
 #include <cstdio>
 #include <cstdlib>
@@ -81,6 +82,7 @@ EventLoop::EventLoop(){
 }
 
 EventLoop::~EventLoop(){
+    ERRORLOG("~EventLoop");
     close(epoll_fd_);
     if(wakeup_fd_event_){
         delete wakeup_fd_event_;
@@ -96,6 +98,7 @@ void EventLoop::initWakeUpFdEvent(){
     }
 
     wakeup_fd_event_ = new WakeUpFdEvent(wakeup_fd_);
+
     wakeup_fd_event_->listen(FdEvent::IN_EVENT, 
         [this]()->void{
             char buf[8];
@@ -118,7 +121,7 @@ void EventLoop::loop(){
     is_loop_ = true;
     while(!stop_){
         /* 执行 tasks_  */
-        ScopeMutex<Mutex> lock(mutex_);
+        std::unique_lock<std::mutex> lock(mutex_);
         std::queue<std::function<void()>> tmp_tasks;
         tmp_tasks.swap(tasks_);
         lock.unlock();
@@ -158,13 +161,6 @@ void EventLoop::loop(){
             if(trigger_event.events & EPOLLOUT){
                 DEBUGLOG("fd [%d:%s] trigger EPOLLOUT event", fd_event->getFd(), fd_event->getFdName().c_str());
                 addTask(fd_event->handler(FdEvent::OUT_EVENT));
-            }
-            if(trigger_event.events & EPOLLERR){
-                DEBUGLOG("fd [%d:%s] trigger EPOLLERR event", fd_event->getFd(), fd_event->getFdName().c_str());
-                delEpollEvent(fd_event);
-                if(fd_event->handler(FdEvent::ERROR_EVENT) != nullptr){
-                    addTask(fd_event->handler(FdEvent::OUT_EVENT));
-                }
             }
 
         }
@@ -214,7 +210,9 @@ bool EventLoop::isInLoopThread(){
 }
 
 void EventLoop::addTask(std::function<void()> callback,  bool is_wake_up /*=false*/){
+    std::unique_lock<std::mutex> lock(mutex_);
     tasks_.push(callback);
+    lock.unlock();
 
     if(is_wake_up){
         wakeup();

@@ -12,6 +12,7 @@
 #include "lrpc/net/tcp/tcp_buffer.h"
 #include <cerrno>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -31,7 +32,7 @@ TcpConnection::TcpConnection(EventLoop* event_loop, int fd, int buffer_size,NetA
     // 服务端，对端为客户端，需要在初始化监听可读事件
     // server中onAccept会创建Connection，连接完成
     if(connection_type_ == ClientConnectionByServer){
-        listenRead();
+        // listenRead();
     }
     // 客户端，对端为服务端，不需要一直监听可读事件
     // 他发送connect后必须等待回包才说明连接成功
@@ -42,7 +43,7 @@ TcpConnection::TcpConnection(EventLoop* event_loop, int fd, int buffer_size,NetA
 }
 
 TcpConnection::~TcpConnection(){
-
+    ERRORLOG("~TcpConnection");
 }
 
 
@@ -257,12 +258,26 @@ void TcpConnection::shutdown(){
 }
 
 void TcpConnection::listenRead(){
-    fd_event_->listen(FdEvent::IN_EVENT, std::bind(&TcpConnection::onRead, this));
+    // std::shared_ptr<TcpConnection> conn = shared_from_this();
+    // fd_event_->listen(FdEvent::IN_EVENT, [conn]()->void{
+    //     conn->onRead();
+    // });
+    // fd_event_->listen(FdEvent::IN_EVENT, std::bind(&TcpConnection::onRead, this));
+    fd_event_->listen(FdEvent::IN_EVENT, [this]()->void{
+        onRead();
+    });
     event_loop_->addEpollEvent(fd_event_);
 }
 
 void TcpConnection::listenWrite(){
-    fd_event_->listen(FdEvent::OUT_EVENT, std::bind(&TcpConnection::onWrite, this));
+    // std::shared_ptr<TcpConnection> conn = shared_from_this();
+    // fd_event_->listen(FdEvent::OUT_EVENT, [conn]()->void{
+    //     conn->onWrite();
+    // });
+    // fd_event_->listen(FdEvent::OUT_EVENT, std::bind(&TcpConnection::onWrite, this));
+    fd_event_->listen(FdEvent::OUT_EVENT, [this]()->void{
+        onWrite();
+    });
     event_loop_->addEpollEvent(fd_event_);
 }
 

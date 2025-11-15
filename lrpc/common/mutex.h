@@ -52,7 +52,6 @@ public:
     }
 
     ~Mutex(){
-        printf("~Mutex\n");
         pthread_mutex_destroy(&mutex_);
     }
 

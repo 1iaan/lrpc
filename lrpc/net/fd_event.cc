@@ -25,7 +25,7 @@ FdEvent::FdEvent(int fd, std::string fd_name): fd_(fd), fd_name_(fd_name){
 }
 
 FdEvent::~FdEvent(){
-
+    ERRORLOG("~FdEvent");
 }
 
 void FdEvent::setNonBlock(){

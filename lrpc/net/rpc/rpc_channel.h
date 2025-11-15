@@ -10,6 +10,7 @@
 #include <google/protobuf/stubs/callback.h>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 namespace lrpc {
 
@@ -83,7 +84,7 @@ private:
     TcpClient::s_ptr client_{nullptr};
 
     std::map<std::string, PendingCall> pending_calls_;
-    Mutex pending_mutex_;
+    std::mutex pending_mutex_;
 
     sem_t conn_semaphore_;
 };

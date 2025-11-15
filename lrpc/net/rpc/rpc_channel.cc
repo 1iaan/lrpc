@@ -9,9 +9,11 @@
 #include "lrpc/net/tcp/tcp_client.h"
 #include "lrpc/net/timer_event.h"
 #include <cassert>
+#include <cstdio>
 #include <google/protobuf/message.h>
 #include <cstddef>
 #include <memory>
+#include <mutex>
 #include <semaphore.h>
 #include <string>
 #include <unistd.h>
@@ -22,6 +24,7 @@ RpcChannel::RpcChannel(NetAddr::s_ptr peer_addr): peer_addr_(peer_addr){
 
     int rt = sem_init(&conn_semaphore_, 0, 0);
     assert(rt == 0);
+
     client_->connect([this]()->void{
 
 
@@ -40,7 +43,7 @@ RpcChannel::RpcChannel(NetAddr::s_ptr peer_addr): peer_addr_(peer_addr){
 }
 
 RpcChannel::~RpcChannel(){
-
+    ERRORLOG("~RpcChannel");
 }
 
 void RpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
@@ -54,22 +57,25 @@ void RpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
         return;
     }
 
-    if(m_controller->getMsgId().empty()){
-        req_protocol->msg_id_ = MsgIDUtil::GenMsgID();
-        m_controller->setMsgId(req_protocol->msg_id_);
-    }else{
-        req_protocol->msg_id_ = m_controller->getMsgId();
-    }
+    req_protocol->msg_id_ = m_controller->getMsgId();
 
     req_protocol->method_name_ = method->full_name();
     INFOLOG("[%s] | call method name [%s]", req_protocol->msg_id_.c_str(), req_protocol->method_name_.c_str());
 
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+    // printf("-------------------------------------\n");
+    // for (auto &kv : pending_calls_) {
+    //     const std::string &key = kv.first;
+    //     printf("key(str) = %s\n", key.c_str());
+    // }
+    // printf("-------------------------------------\n");
     if(pending_calls_.find(m_controller->getMsgId()) == pending_calls_.end()){
         std::string err_info = "RpcChannel not init this call";
         m_controller->setError(ERROR_CHANNEL_INIT, err_info);
         ERRORLOG("%s | %s", req_protocol->msg_id_.c_str(), err_info.c_str());
         return ;
     }
+    lock.unlock();
 
     
     if(!request->SerializeToString(&req_protocol->pb_data_)){
@@ -132,13 +138,14 @@ void RpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
 }
 
 void RpcChannel::addPendingCall(controller_s_ptr controller, message_s_ptr req, message_s_ptr res, closure_s_ptr done){
-    ScopeMutex<Mutex> lock(pending_mutex_);
+    std::unique_lock<std::mutex> lock(pending_mutex_);
     RpcController* m_controller =  dynamic_cast<RpcController*>(controller.get());
     pending_calls_[m_controller->getMsgId()] = {controller, req, res, done};
 }
 
 void RpcChannel::delPendingCall(std::string msg_id){
-    ScopeMutex<Mutex> lock(pending_mutex_);
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+
     auto it = pending_calls_.find(msg_id);
     if(it != pending_calls_.end()) {
         pending_calls_.erase(it);
@@ -146,26 +153,38 @@ void RpcChannel::delPendingCall(std::string msg_id){
 }
 
 google::protobuf::RpcController* RpcChannel::getController(std::string msg_id){
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+
     return pending_calls_[msg_id].controller.get();
 }
 
 google::protobuf::Message* RpcChannel::getRequest(std::string msg_id){
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+
     return pending_calls_[msg_id].request.get();
 }
 
 google::protobuf::Message* RpcChannel::getResponse(std::string msg_id){
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+
     return pending_calls_[msg_id].response.get();
 }
 
 google::protobuf::Closure* RpcChannel::getClosure(std::string msg_id){
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+
     return pending_calls_[msg_id].closure.get();
 }
 
 TimerEvent* RpcChannel::getTimerEvent(std::string msg_id){
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+
     return pending_calls_[msg_id].timer.get();
 }
 
 void RpcChannel::addTimerEvent(std::string msg_id, TimerEvent::s_ptr event){
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+
     client_->addTimerEvent(event);
     pending_calls_[msg_id].timer = event;
 }

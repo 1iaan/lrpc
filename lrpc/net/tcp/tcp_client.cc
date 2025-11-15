@@ -25,7 +25,7 @@ TcpClient::TcpClient(NetAddr::s_ptr peer_addr):peer_addr_(peer_addr){
         return ;
     }
 
-    fd_event_ = FdEventGroup::GetFdEventGroup()->getFdEvent(fd_);
+    fd_event_ = new FdEvent(fd_);
     fd_event_->setNonBlock();
 
     connection_ = std::make_shared<TcpConnection>(event_loop_, fd_, 128, nullptr, peer_addr_, TcpConnection::ServerConnectionByClient);
@@ -36,6 +36,10 @@ TcpClient::~TcpClient(){
     DEBUGLOG("~TcpClient");
     if(fd_ > 0){
         close(fd_);
+    }
+    if(fd_event_){
+        delete fd_event_;
+        fd_event_ = NULL;
     }
 }
 
@@ -78,7 +82,8 @@ void TcpClient::connect(std::function<void()> callback){
                         fd_ = socket(peer_addr_->getFamily(), SOCK_STREAM, 0);
                     }
 
-                    event_loop_->delEpollEvent(fd_event_);
+                    fd_event_->cancel(FdEvent::OUT_EVENT);
+                    event_loop_->addEpollEvent(fd_event_);
                     DEBUGLOG("now begin to done");
                     if(callback){
                         callback();

@@ -16,7 +16,7 @@ namespace lrpc{
 
 class RpcDispatcher;
 
-class TcpConnection{
+class TcpConnection : public std::enable_shared_from_this<TcpConnection>{
 public:
     enum TcpState{
         NotConnected = 1,

@@ -5,6 +5,7 @@
 #include "lrpc/net/timer.h"
 #include "lrpc/net/wakeup_fd_event.h"
 #include "timer_event.h"
+#include <mutex>
 #include <queue>
 #include <sched.h>
 #include <set>
@@ -59,9 +60,14 @@ private:
     // 正在监听的事件
     std::set<int> listen_fds_;
 
+    struct Task{
+        const char* origin;
+        std::function<void()> cb;
+    };
+
     std::queue<std::function<void()>> tasks_;
 
-    Mutex mutex_;
+    std::mutex mutex_;
 
 private:
     void dealWakeup();

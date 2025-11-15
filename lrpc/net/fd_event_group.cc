@@ -1,4 +1,5 @@
 #include "lrpc/net/fd_event_group.h"
+#include "lrpc/common/log.h"
 #include "lrpc/common/mutex.h"
 #include "lrpc/net/fd_event.h"
 #include <cstddef>
@@ -14,6 +15,7 @@ FdEventGroup::FdEventGroup(size_t size):size_(size){
 }
     
 FdEventGroup::~FdEventGroup(){
+    DEBUGLOG("~FdEventGroup");
     for(int i = 0;i < size_ ; ++ i){
         if(fd_group_[i]){
             delete fd_group_[i];
