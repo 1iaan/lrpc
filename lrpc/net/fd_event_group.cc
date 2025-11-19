@@ -3,6 +3,7 @@
 #include "lrpc/common/mutex.h"
 #include "lrpc/net/fd_event.h"
 #include <cstddef>
+#include <mutex>
 
 namespace lrpc{
 
@@ -25,7 +26,8 @@ FdEventGroup::~FdEventGroup(){
 }
 
 FdEvent* FdEventGroup::getFdEvent(int fd){
-    ScopeMutex<Mutex> lock(mutex_);
+    // ScopeMutex<Mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     if(fd < size_){
         return fd_group_[fd];
     }

@@ -15,11 +15,11 @@ class ScopeMutex{
 public:
     ScopeMutex(T& mutex): mutex_(mutex){
         mutex_.lock();
-        is_lock_ = true;
     }
     ~ScopeMutex(){
-        mutex_.unlock();
-        is_lock_ = false;
+        if(is_lock_){
+            mutex_.unlock();
+        }
     }
 
     void lock() {
@@ -62,6 +62,10 @@ public:
     void unlock(){
         pthread_mutex_unlock(&mutex_);
     }
+
+
+    Mutex(const Mutex&) = delete;
+    Mutex& operator=(const Mutex&) = delete;
 
 private:
     pthread_mutex_t mutex_;

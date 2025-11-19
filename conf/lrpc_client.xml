@@ -4,7 +4,7 @@
     
     <!-- 日志级别: DEBUG / INFO / ERROR -->
     <log_level>INFO</log_level>
-    <log_file_name>log_server</log_file_name>
+    <log_file_name>log_client</log_file_name>
     <log_file_path>../log/</log_file_path>
     <log_max_file_size>1024000</log_max_file_size>
     <log_sync_internal>500</log_sync_internal>

@@ -87,7 +87,11 @@ void RpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
 
     s_ptr channel = shared_from_this();
 
-    TimerEvent::s_ptr timer_event_ = std::make_shared<TimerEvent>(m_controller->getTimeOut(), false, [m_controller, channel]() mutable->void{
+    TimerEvent::s_ptr timer_event_ = std::make_shared<TimerEvent>(
+        m_controller->getTimeOut(), 
+        false, 
+        [m_controller, channel]() mutable->void
+        {
         m_controller->StartCancel();
         m_controller->setError(ERROR_FAILED_SERIALIZE, "rpc call timeout " + std::to_string(m_controller->getTimeOut()));
     
@@ -95,7 +99,6 @@ void RpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
             channel->getClosure(m_controller->getMsgId())->Run();
         }
         channel.reset();
-        
     });
 
     channel->addTimerEvent(m_controller->getMsgId(), timer_event_);

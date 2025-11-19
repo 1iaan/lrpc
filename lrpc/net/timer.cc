@@ -7,9 +7,11 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <functional>
+#include <mutex>
 #include <strings.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
@@ -41,7 +43,8 @@ Timer::~Timer(){
 void Timer::addTimerEvent(TimerEvent::s_ptr event){
     bool is_reset_timerfd = false;
 
-    ScopeMutex<Mutex> lock(mutex_);
+    // ScopeMutex<Mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     if(events_.empty()){
         is_reset_timerfd = true;
     }else{
@@ -62,7 +65,8 @@ void Timer::addTimerEvent(TimerEvent::s_ptr event){
 void Timer::deleteTimerEvent(TimerEvent::s_ptr event){
     event->setCanceled(true);
 
-    ScopeMutex<Mutex> lock(mutex_);
+    // ScopeMutex<Mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
 
     auto begin = events_.lower_bound(event->getArriveTime());
     auto end = events_.upper_bound(event->getArriveTime());
@@ -95,7 +99,8 @@ void Timer::onTimer(){
     std::vector<TimerEvent::s_ptr> tmps;
     // std::vector<std::pair<uint64_t, std::function<void()>>> tasks;
 
-    ScopeMutex<Mutex> lock(mutex_);
+    // ScopeMutex<Mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     auto it = events_.begin();
 
     for(it = events_.begin(); it != events_.end(); ++ it){
@@ -136,7 +141,8 @@ void Timer::onTimer(){
 }
 
 void Timer::resetArriveTime(){
-    ScopeMutex<Mutex> lock(mutex_);
+    // ScopeMutex<Mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     auto tmp = events_;
     lock.unlock();
 

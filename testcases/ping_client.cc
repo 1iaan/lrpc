@@ -54,11 +54,11 @@ void client_worker(int thread_id, int requests_per_thread) {
 }
 
 int main() {
-    lrpc::Config::SetGlobalConfig("../conf/lrpc.xml");
+    lrpc::Config::SetGlobalConfig("../conf/lrpc_client.xml");
     lrpc::Logger::SetGlobalLogger();
 
-    int thread_num = 2;
-    int requests_per_thread = 1000;
+    int thread_num = 4;
+    int requests_per_thread = 10000;
 
     std::vector<std::thread> threads;
     auto start = high_resolution_clock::now();

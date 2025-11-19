@@ -10,6 +10,7 @@ public:
               const ::PingRequest* request,
               ::PingResponse* response,
               ::google::protobuf::Closure* done) override {
+        APPINFOLOG("Call ping success");
         // 不做复杂逻辑，直接回包
         response->set_reply("pong");
         if (done) done->Run();

@@ -166,7 +166,8 @@ void TcpConnection::onWrite(){
         return ;
     }
 
-    ScopeMutex<Mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
+    // ScopeMutex<Mutex> lock(mutex_);
     std::vector<
         std::pair<AbstractProtocol::s_ptr, std::function<void(AbstractProtocol::s_ptr)>>
     > tmp = write_callbacks_;
@@ -282,12 +283,14 @@ void TcpConnection::listenWrite(){
 }
 
 void TcpConnection::pushSendMessage(AbstractProtocol::s_ptr message, std::function<void(AbstractProtocol::s_ptr)> callback){
-    ScopeMutex<Mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
+    // ScopeMutex<Mutex> lock(mutex_);
     write_callbacks_.push_back(std::make_pair(message, callback));
 }
 
 void TcpConnection::pushReadMessage(std::string msg_id, std::function<void(AbstractProtocol::s_ptr)> callback){
-    ScopeMutex<Mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
+    // ScopeMutex<Mutex> lock(mutex_);
     read_callbacks_.insert(std::make_pair(msg_id, callback));
 }
 

@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <map>
+#include <mutex>
 
 namespace lrpc{
 
@@ -98,7 +99,8 @@ private:
 
     AbstractCoder* coder_{NULL};
 
-    Mutex mutex_;
+    // Mutex mutex_;
+    std::mutex mutex_;
 };
 
 }   // namespace lrpc

@@ -4,6 +4,7 @@
 #include "lrpc/common/mutex.h"
 #include <cstdint>
 #include <map>
+#include <mutex>
 
 
 namespace lrpc{
@@ -23,7 +24,8 @@ public:
 
 private:
     std::multimap<int64_t, TimerEvent::s_ptr> events_;
-    Mutex mutex_;
+    // Mutex mutex_;
+    std::mutex mutex_;
 
 private:
     void resetArriveTime();

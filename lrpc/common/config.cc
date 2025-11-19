@@ -1,5 +1,6 @@
 #include "lrpc/common/config.h"
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <tinyxml/tinyxml.h>
 
@@ -45,18 +46,36 @@ Config::Config(const char* xmlfile): xmlfile_(xmlfile){
 
     getThreadConfig(root_node);
 
-    printf("Config: \n");
+    printf("Config Initialized: \n");
+    printf("log config: \n");
     printf("\tlog_level:[%s]\n", log_level_.c_str());
+    printf("\tlog_file_name:[%s]\n", log_file_name_.c_str());
+    printf("\tlog_file_path:[%s]\n", log_file_path_.c_str());
+    printf("\tlog_max_file_size:[%d]\n", log_max_file_size_);
+    printf("\tlog_sync_internal:[%d]\n", log_sync_internal_);
+
+    printf("thread config: \n");
     printf("\tio_thread_num:[%d]\n", io_thread_num_);
-    printf("\torker_thread_num:[%d]\n", worker_thread_num_);
+    printf("\tworker_thread_num:[%d]\n", worker_thread_num_);
+
+    printf("server config: \n");
+
 }
 
 void Config::getLogConfig(TiXmlElement* root_node){
     READ_XML_NODE(log, root_node);
 
     READ_STR_FROM_XML_NODE(log_level, log_node);
+    READ_STR_FROM_XML_NODE(log_file_name, log_node);
+    READ_STR_FROM_XML_NODE(log_file_path, log_node);
+    READ_STR_FROM_XML_NODE(log_max_file_size, log_node);
+    READ_STR_FROM_XML_NODE(log_sync_internal, log_node);
 
-    log_level_ = log_level;
+    this->log_level_ = log_level;
+    this->log_file_name_ = log_file_name;
+    this->log_file_path_ = log_file_path;
+    this->log_max_file_size_ = std::atoi(log_max_file_size.c_str());
+    this->log_sync_internal_ = std::atoi(log_sync_internal.c_str());
 }
 
 void Config::getThreadConfig(TiXmlElement* root_node){

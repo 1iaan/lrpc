@@ -1,6 +1,7 @@
 #include "lrpc/common/error_code.h"
 #include "lrpc/common/log.h"
 #include "lrpc/net/rpc/rpc_dispatcher.h"
+#include "lrpc/common/run_time.h"
 #include "lrpc/net/coder/tinypb_protocol.h"
 #include "lrpc/net/rpc/rpc_controller.h"
 #include "lrpc/net/tcp/net_addr.h"
@@ -70,6 +71,8 @@ void RpcDispatcher::dispatch(AbstractProtocol::s_ptr request, AbstractProtocol::
     controller.setPeerAddr(connection->getPeerAddr());
     controller.setMsgId(req_protocol->msg_id_);
 
+    RunTime::GetRunTime()->msg_id_ = req_protocol->msg_id_;
+    RunTime::GetRunTime()->method_name_ = req_protocol->method_name_;
     service->CallMethod(method, &controller, req_msg, rsp_msg, NULL);
 
     if(!rsp_msg->SerializeToString(&rsp_protocol->pb_data_)){
