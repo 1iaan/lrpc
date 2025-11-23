@@ -1,5 +1,6 @@
 
-学习用个人rpc框架实现
+学习用个人rpc框架实现  
+项目参考了 https://github.com/Gooddbird/rocket 
 
 - [前置知识](#前置知识)
 - [环境](#环境)
@@ -902,4 +903,4 @@ Stub需要用channel作为参数初始化，后续调用对应的func会自动�
 # 测试
 
 # 结语
-实现了一个轻量级C++ RPC框架，基于 Reactor 架构，单机可达100KQPS。项目参考了muduo 网络框架，包含代码生成工具、异步日志。通过本项目我熟悉了RPC通信原理，Reactor 架构，Linux 下后台开发知识。
+实现了一个轻量级C++ RPC框架，基于 Reactor 架构。项目参考了muduo 网络框架，包含代码生成工具、异步日志。通过本项目我熟悉了RPC通信原理，Reactor 架构，Linux 下后台开发知识。
